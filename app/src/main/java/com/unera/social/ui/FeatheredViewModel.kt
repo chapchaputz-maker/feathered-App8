@@ -1,0 +1,3931 @@
+package com.unera.social.ui
+
+import android.app.Application
+import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
+import com.unera.social.data.EventsApiService
+import com.unera.social.data.GroupsApiService
+import com.unera.social.data.GroupMemberInfo
+import com.unera.social.data.MarketplaceApiService
+import com.unera.social.data.MockData
+import com.unera.social.data.PostsApiService
+import com.unera.social.data.StoriesApiService
+import com.unera.social.data.UserApiService
+import com.unera.social.data.UserSessionManager
+import com.unera.social.data.VideosApiService
+import com.unera.social.data.FeedInteractionApiService
+import android.content.Context
+import android.net.Uri
+import com.unera.social.data.MediaUploadHelper
+import com.unera.social.model.*
+import com.unera.social.ui.components.PostUploadState
+import org.json.JSONObject
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+
+data class FeatheredUiState(
+    val currentScreen: Screen = Screen.FEED,
+    val currentUser: User = MockData.currentUser,
+    val users: List<User> = MockData.users,
+    val peopleYouMayKnow: List<User> = emptyList(),
+    val isPymkLoading: Boolean = false,
+    val hiddenPymkIds: Set<Long> = emptySet(),
+    val posts: List<Post> = emptyList(),
+    val isFeedLoading: Boolean = false,
+    val videoPosts: List<Post> = emptyList(),
+    val isVideosLoading: Boolean = false,
+    val sponsoredFeedAds: List<SponsoredFeedAd> = emptyList(),
+    val isFeedAdsLoading: Boolean = false,
+    val userProfilePosts: Map<Long, List<Post>> = emptyMap(),
+    val isProfilePostsLoading: Boolean = false,
+    val stories: List<Story> = emptyList(),
+    val isStoriesLoading: Boolean = false,
+    val storyViewers: Map<Long, List<StoryViewer>> = emptyMap(),
+    val isStoryViewersLoading: Boolean = false,
+    val storyComments: Map<Long, List<StoryComment>> = emptyMap(),
+    val isStoryCommentsLoading: Boolean = false,
+    val storyReactions: Map<Long, StoryReactionsData> = emptyMap(),
+    val storyAnalytics: Map<Long, StoryAnalytics> = emptyMap(),
+    val reels: List<Reel> = emptyList(),
+    val products: List<Product> = emptyList(),
+    val isProductsLoading: Boolean = false,
+    val selectedCategory: String = "all",
+    val selectedCountry: String = "all",
+    val marketMode: String = "for_you", // "for_you", "local", "worldwide"
+    val events: List<Event> = MockData.events,
+    val conversations: List<Conversation> = MockData.conversations,
+    val activeConversationId: String? = null,
+    val notifications: List<Notification> = MockData.notifications,
+    val searchQuery: String = "",
+    val showCreatePostDialog: Boolean = false,
+    val createPostInitialPicker: String? = null,
+    val selectedPostForComments: Post? = null,
+    val showSearchDialog: Boolean = false,
+    val showNotificationsOverlay: Boolean = false,
+    val showCreateEventDialog: Boolean = false,
+    val showCreateProductDialog: Boolean = false,
+    val selectedProductForDetail: Product? = null,
+    val selectedStory: Story? = null,
+    val showCreateStoryDialog: Boolean = false,
+    val showMenuOverlay: Boolean = false,
+    val selectedUserProfile: User? = null,
+    // F-Music state
+    val songs: List<Song> = MockData.songs,
+    val currentAudioTrack: AudioTrack? = null,
+    val isPlayingAudio: Boolean = false,
+    val audioPositionSeconds: Int = 0,
+    val audioDurationSeconds: Int = 180,
+    val isPlayerExpanded: Boolean = false,
+    val isShuffleEnabled: Boolean = false,
+    val isRepeatEnabled: Boolean = false,
+    val audioVolume: Float = 1.0f,
+    val likedTrackKeys: Set<String> = setOf("music:1", "music:4", "music:6"),
+    val myTotalPlays: Long = 33290L,
+    val trackPlays: Map<String, Long> = emptyMap(),
+    val songComments: Map<String, List<SongComment>> = mapOf(
+        "1" to MockData.initialSongComments.filter { it.songId == "1" },
+        "2" to MockData.initialSongComments.filter { it.songId == "2" }
+    ),
+    val downloadedTrackIds: Set<String> = emptySet(),
+    val downloadingTrackId: String? = null,
+    val downloadProgress: Int = 0,
+    val downloadToast: String? = null,
+    val activeDiscussionTrack: AudioTrack? = null,
+    val activeShareTrack: AudioTrack? = null,
+    val songUploadProgress: Int? = null,
+    val songUploadStatus: String? = null,
+    // Groups state
+    val groups: List<Group> = emptyList(),
+    val groupPosts: List<GroupPost> = emptyList(),
+    val groupInvites: List<GroupInvite> = emptyList(),
+    val groupSuggestions: List<Group> = emptyList(),
+    val groupMembers: Map<Long, List<GroupMemberInfo>> = emptyMap(),
+    val groupEvents: Map<Long, List<Event>> = emptyMap(),
+    val isGroupsLoading: Boolean = false,
+    val isGroupPostsLoading: Boolean = false,
+    val activeGroupId: Long? = null,
+    val groupMembersOverrides: Map<Long, Map<Long, String>> = emptyMap(), // groupId -> (userId -> role)
+    val groupPostingDisabledOverrides: Map<Long, Set<Long>> = emptyMap(), // groupId -> Set<userId>
+    // Ads Manager state
+    val adCampaigns: List<AdCampaign> = listOf(
+        AdCampaign(
+            id = 1L,
+            name = "Summer Safari Adventure 2026",
+            type = "image",
+            status = "active",
+            mediaUrl = "https://images.unsplash.com/photo-1516426122078-c23e76319801?w=800",
+            mediaUrls = listOf(
+                "https://images.unsplash.com/photo-1516426122078-c23e76319801?w=800",
+                "https://images.unsplash.com/photo-1547471080-7cc2caa01a7e?w=800"
+            ),
+            description = "Experience the majestic Serengeti migration and Ngorongoro Crater! Book early and enjoy 20% off all luxury tented lodge packages. 🦁🌿",
+            cta = "Book Now",
+            link = "https://tanzaniasafari.example.com",
+            phone = "+255 754 112 233",
+            email = "safari@example.com",
+            location = "Tanzania & East Africa",
+            budget = 15,
+            days = 14,
+            startDate = "2026-03-01",
+            endDate = "2026-03-15",
+            impressions = 14200,
+            views = 9850,
+            clicks = 680,
+            postId = 1L
+        ),
+        AdCampaign(
+            id = 2L,
+            name = "Authentic Kitenge Bomber Jackets",
+            type = "image",
+            status = "active",
+            mediaUrl = "https://images.unsplash.com/photo-1551028719-00167b16eac5?w=800",
+            mediaUrls = listOf("https://images.unsplash.com/photo-1551028719-00167b16eac5?w=800"),
+            description = "Handmade artisan Kitenge bomber jackets now available with free delivery across Dar es Salaam. Unisex sizes S to XXL! 🎨🔥",
+            cta = "Shop Now",
+            link = "https://kitengefashion.example.com",
+            phone = "+255 682 998 877",
+            email = "orders@kitengefashion.com",
+            location = "Dar es Salaam, Tanzania",
+            budget = 10,
+            days = 7,
+            startDate = "2026-03-05",
+            endDate = "2026-03-12",
+            impressions = 8940,
+            views = 6200,
+            clicks = 412,
+            postId = 2L
+        ),
+        AdCampaign(
+            id = 3L,
+            name = "Kilimanjaro Summit Expedition",
+            type = "video",
+            status = "paused",
+            mediaUrl = "https://images.unsplash.com/photo-1589556264800-08ae9e129a8c?w=800",
+            mediaUrls = listOf("https://images.unsplash.com/photo-1589556264800-08ae9e129a8c?w=800"),
+            description = "Conquer the roof of Africa with certified guides and full safety equipment. Machame and Lemosho route expeditions departing every week.",
+            cta = "Learn More",
+            link = "https://kilimanjaroclimb.example.com",
+            phone = "+255 712 345 678",
+            location = "Global",
+            budget = 25,
+            days = 21,
+            startDate = "2026-02-10",
+            endDate = "2026-03-03",
+            impressions = 24600,
+            views = 18400,
+            clicks = 980,
+            postId = 3L
+        )
+    ),
+    val activeAdCampaignToBoostPost: Post? = null,
+    // Authentication State
+    val isLoggedIn: Boolean = false,
+    val isGuest: Boolean = true,
+    val showAuthModal: Boolean = false,
+    val authMode: String = "login", // "login", "register", "forgot"
+    val postUploadState: PostUploadState? = null,
+    val fullScreenImageViewerUrl: String? = null,
+    val isAppLoading: Boolean = false
+)
+
+class FeatheredViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val _uiState = MutableStateFlow(FeatheredUiState())
+    val uiState: StateFlow<FeatheredUiState> = _uiState.asStateFlow()
+
+    init {
+        // Session restore on app load matching App.tsx auto-on-app-load
+        val context = getApplication<Application>().applicationContext
+        val savedUser = UserSessionManager.getSavedUser(context)
+        val savedToken = UserSessionManager.getAuthToken(context)
+        if (savedUser != null && savedUser.id > 0L) {
+            _uiState.update {
+                it.copy(
+                    currentUser = savedUser,
+                    isLoggedIn = true,
+                    isGuest = false,
+                    showAuthModal = false
+                )
+            }
+            // Refresh fresh profile from /api/auth/user/me or /api/users?id=<id> in background
+            viewModelScope.launch {
+                try {
+                    var fresh = if (!savedToken.isNullOrBlank()) {
+                        UserApiService.fetchCurrentUser(savedToken)
+                    } else null
+                    if (fresh == null) {
+                        fresh = UserApiService.fetchUserById(savedUser.id, savedToken)
+                    }
+                    if (fresh != null) {
+                        val updated = savedUser.copy(
+                            name = fresh.name.ifBlank { savedUser.name },
+                            username = fresh.username.ifBlank { savedUser.username },
+                            email = if (fresh.email.isNotBlank()) fresh.email else savedUser.email,
+                            profileImageUrl = fresh.profileImageUrl.ifBlank { savedUser.profileImageUrl },
+                            coverImageUrl = fresh.coverImageUrl.ifBlank { savedUser.coverImageUrl },
+                            bio = fresh.bio.ifBlank { savedUser.bio },
+                            location = fresh.location.ifBlank { savedUser.location },
+                            isVerified = fresh.isVerified || savedUser.isVerified,
+                            role = fresh.role.ifBlank { savedUser.role },
+                            followersCount = if (fresh.followersCount > 0) fresh.followersCount else savedUser.followersCount,
+                            followingCount = if (fresh.followingCount > 0) fresh.followingCount else savedUser.followingCount
+                        )
+                        _uiState.update { it.copy(currentUser = updated) }
+                        UserSessionManager.saveAuth(context, savedToken, updated)
+                    }
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
+            }
+        } else {
+            // Guest mode: unauthenticated user without login, using clean guest profile (id=0L)
+            _uiState.update {
+                it.copy(
+                    currentUser = MockData.currentUser,
+                    isLoggedIn = false,
+                    isGuest = true,
+                    showAuthModal = false
+                )
+            }
+        }
+
+        fetchPeopleYouMayKnow()
+        fetchLiveUsers()
+        refreshLiveProducts()
+        refreshLiveEvents()
+        refreshFeed()
+        refreshGroups()
+        refreshStories()
+        refreshVideos()
+        refreshFeedAds()
+    }
+
+    private fun enrichPostsWithAuthors(posts: List<Post>, users: List<User>): List<Post> {
+        if (users.isEmpty() || posts.isEmpty()) return posts
+        val userMap = users.associateBy { it.id }
+        return posts.map { post ->
+            val uId = if (post.userId > 0L) post.userId else post.author.id
+            val matchedUser = userMap[uId]
+            if (matchedUser != null) {
+                val realName = matchedUser.name.ifBlank { matchedUser.username.removePrefix("@") }
+                val author = post.author.copy(
+                    id = matchedUser.id,
+                    name = if (realName.isNotBlank() && !realName.startsWith("User")) realName else post.author.name,
+                    username = if (matchedUser.username.isNotBlank()) matchedUser.username else post.author.username,
+                    profileImageUrl = matchedUser.profileImageUrl.ifBlank { post.author.profileImageUrl },
+                    isVerified = matchedUser.isVerified || post.author.isVerified,
+                    role = matchedUser.role.ifBlank { post.author.role },
+                    isFollowing = matchedUser.isFollowing || post.author.isFollowing,
+                    followersCount = if (matchedUser.followersCount > 0) matchedUser.followersCount else post.author.followersCount
+                )
+                post.copy(author = author, userId = matchedUser.id)
+            } else {
+                post
+            }
+        }
+    }
+
+    fun refreshVideos() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isVideosLoading = true) }
+            val uid = if (_uiState.value.isLoggedIn && !_uiState.value.isGuest) _uiState.value.currentUser.id else null
+            val liveVideos = VideosApiService.fetchVideos(userId = uid, limit = 50)
+            val enriched = enrichPostsWithAuthors(liveVideos, _uiState.value.users)
+            _uiState.update { state ->
+                state.copy(
+                    videoPosts = enriched,
+                    isVideosLoading = false
+                )
+            }
+        }
+    }
+
+    fun refreshFeedAds() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isFeedAdsLoading = true) }
+            val liveAds = VideosApiService.fetchFeedAds()
+            _uiState.update { state ->
+                state.copy(
+                    sponsoredFeedAds = liveAds,
+                    isFeedAdsLoading = false
+                )
+            }
+        }
+    }
+
+    fun refreshFeed() {
+        fetchPeopleYouMayKnow()
+        fetchLiveUsers()
+        viewModelScope.launch {
+            _uiState.update { it.copy(isFeedLoading = true) }
+            val isUserLoggedIn = _uiState.value.isLoggedIn && !_uiState.value.isGuest
+            val livePosts = if (isUserLoggedIn) {
+                // Logged in feed fetches live data from api/feeds
+                PostsApiService.fetchFeedPosts(userId = _uiState.value.currentUser.id)
+            } else {
+                // Non-logged in feed fetches from api/posts
+                PostsApiService.fetchPublicPosts()
+            }
+            val currentUid = if (isUserLoggedIn) _uiState.value.currentUser.id else 0L
+            val myFollowData = if (currentUid > 0L) UserApiService.fetchUserFollowData(currentUid) else null
+            val myFollowingSet = myFollowData?.following?.toSet() ?: emptySet()
+
+            val currentUsers = _uiState.value.users.map { u ->
+                if (myFollowingSet.contains(u.id)) u.copy(isFollowing = true) else u
+            }
+            val enrichedPosts = enrichPostsWithAuthors(livePosts, currentUsers).map { p ->
+                val uId = if (p.userId > 0L) p.userId else p.author.id
+                if (myFollowingSet.contains(uId)) {
+                    p.copy(author = p.author.copy(isFollowing = true))
+                } else p
+            }
+            _uiState.update { state ->
+                val updatedPymk = state.peopleYouMayKnow.map { u ->
+                    if (myFollowingSet.contains(u.id)) u.copy(isFollowing = true) else u
+                }
+                val updatedCurrentUser = if (myFollowData != null) {
+                    state.currentUser.copy(
+                        followersCount = myFollowData.followers.size,
+                        followingCount = myFollowData.following.size
+                    )
+                } else state.currentUser
+
+                state.copy(
+                    currentUser = updatedCurrentUser,
+                    users = currentUsers,
+                    peopleYouMayKnow = updatedPymk,
+                    posts = enrichedPosts,
+                    isFeedLoading = false
+                )
+            }
+
+            // Check for missing authors whose ID is > 0 but not yet in cached users
+            val missingUserIds = enrichedPosts
+                .map { if (it.userId > 0L) it.userId else it.author.id }
+                .filter { it > 0L && currentUsers.none { u -> u.id == it } }
+                .distinct()
+
+            if (missingUserIds.isNotEmpty()) {
+                val fetchedUsers = mutableListOf<User>()
+                for (uid in missingUserIds.take(15)) {
+                    val u = UserApiService.fetchUserById(uid)
+                    if (u != null) {
+                        fetchedUsers.add(u)
+                    }
+                }
+                if (fetchedUsers.isNotEmpty()) {
+                    _uiState.update { state ->
+                        val combined = (state.users + fetchedUsers).distinctBy { it.id }
+                        val reEnriched = enrichPostsWithAuthors(state.posts, combined)
+                        val reEnrichedVideos = enrichPostsWithAuthors(state.videoPosts, combined)
+                        state.copy(users = combined, posts = reEnriched, videoPosts = reEnrichedVideos)
+                    }
+                }
+            }
+        }
+    }
+
+    fun fetchUserProfilePosts(userId: Long) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isProfilePostsLoading = true) }
+            val userPosts = PostsApiService.fetchUserPosts(userId)
+            val currentUsers = _uiState.value.users
+            val enriched = enrichPostsWithAuthors(userPosts, currentUsers)
+            _uiState.update { state ->
+                val updatedMap = state.userProfilePosts + (userId to enriched)
+                state.copy(
+                    userProfilePosts = updatedMap,
+                    isProfilePostsLoading = false
+                )
+            }
+        }
+    }
+
+    fun refreshLiveProducts() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isProductsLoading = true) }
+            val liveProducts = MarketplaceApiService.fetchLiveProducts()
+            _uiState.update { state ->
+                state.copy(
+                    products = liveProducts,
+                    isProductsLoading = false
+                )
+            }
+        }
+    }
+
+    fun refreshLiveEvents() {
+        viewModelScope.launch {
+            val uid = if (_uiState.value.isLoggedIn && !_uiState.value.isGuest) _uiState.value.currentUser.id else null
+            val liveEvents = EventsApiService.fetchLiveEvents(uid)
+            if (liveEvents.isNotEmpty()) {
+                _uiState.update { state ->
+                    state.copy(events = liveEvents)
+                }
+            }
+        }
+    }
+
+    fun fetchPeopleYouMayKnow() {
+        viewModelScope.launch {
+            val isUserLoggedIn = _uiState.value.isLoggedIn && !_uiState.value.isGuest
+            val currentUid = if (isUserLoggedIn) _uiState.value.currentUser.id else 0L
+            _uiState.update { it.copy(isPymkLoading = true) }
+            val suggestions = UserApiService.fetchSuggestions(if (currentUid > 0L) currentUid else 1L, limit = 20)
+            val hidden = _uiState.value.hiddenPymkIds
+            val filtered = suggestions.filter { (currentUid <= 0L || it.id != currentUid) && !hidden.contains(it.id) }
+            _uiState.update { state ->
+                state.copy(
+                    peopleYouMayKnow = filtered,
+                    isPymkLoading = false
+                )
+            }
+        }
+    }
+
+    fun fetchLiveUsers() {
+        viewModelScope.launch {
+            val liveUsers = UserApiService.fetchLiveUsers(limit = 50)
+            if (liveUsers.isNotEmpty()) {
+                _uiState.update { state ->
+                    val allCombined = if (state.isLoggedIn && !state.isGuest && state.currentUser.id > 0L) {
+                        (listOf(state.currentUser) + liveUsers).distinctBy { it.id }
+                    } else {
+                        liveUsers.distinctBy { it.id }
+                    }
+                    val enrichedPosts = enrichPostsWithAuthors(state.posts, allCombined)
+                    val enrichedVideos = enrichPostsWithAuthors(state.videoPosts, allCombined)
+                    state.copy(
+                        users = allCombined,
+                        posts = enrichedPosts,
+                        videoPosts = enrichedVideos
+                    )
+                }
+            }
+        }
+    }
+
+    fun dismissPymk(userId: Long) {
+        _uiState.update { state ->
+            state.copy(
+                hiddenPymkIds = state.hiddenPymkIds + userId,
+                peopleYouMayKnow = state.peopleYouMayKnow.filter { it.id != userId }
+            )
+        }
+    }
+
+    fun setScreen(screen: Screen) {
+        _uiState.update {
+            it.copy(
+                currentScreen = screen,
+                activeConversationId = if (screen != Screen.MESSAGES) null else it.activeConversationId
+            )
+        }
+        if (screen == Screen.MARKETPLACE) {
+            refreshLiveProducts()
+        } else if (screen == Screen.EVENTS) {
+            refreshLiveEvents()
+        } else if (screen == Screen.DISCOVER_PEOPLE) {
+            fetchPeopleYouMayKnow()
+            fetchLiveUsers()
+        } else if (screen == Screen.FEED) {
+            refreshFeed()
+            refreshStories()
+        } else if (screen == Screen.REELS) {
+            refreshVideos()
+            refreshFeedAds()
+        } else if (screen == Screen.PROFILE) {
+            val uid = _uiState.value.selectedUserProfile?.id ?: _uiState.value.currentUser.id
+            fetchUserProfilePosts(uid)
+        } else if (screen == Screen.GROUPS) {
+            refreshGroups()
+        }
+    }
+
+    fun setMarketMode(mode: String) {
+        _uiState.update { it.copy(marketMode = mode) }
+    }
+
+    fun setSelectedCountry(country: String) {
+        _uiState.update { it.copy(selectedCountry = country) }
+    }
+
+    fun setSelectedCategory(category: String) {
+        _uiState.update { it.copy(selectedCategory = category) }
+    }
+
+    fun toggleLikePost(postId: Long) {
+        reactToPost(postId, "like")
+    }
+
+    fun reactToPost(postId: Long, reaction: String) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val post = _uiState.value.posts.find { it.id == postId } ?: _uiState.value.videoPosts.find { it.id == postId }
+        if (post == null) return
+
+        val isSame = post.myReaction == reaction
+        val newReaction = if (isSame) null else reaction
+        val finalReactionToSend = newReaction ?: "unlike"
+
+        _uiState.update { state ->
+            val updatedPosts = state.posts.map { p ->
+                if (p.id == postId) {
+                    val prevHadReaction = p.myReaction != null
+                    val newCount = when {
+                        !prevHadReaction && newReaction != null -> p.likesCount + 1
+                        prevHadReaction && newReaction == null -> (p.likesCount - 1).coerceAtLeast(0)
+                        else -> p.likesCount
+                    }
+                    val existingWithoutMe = p.reactions.filter { it.userId != state.currentUser.id }
+                    val updatedReactions = if (newReaction != null) {
+                        existingWithoutMe + UserReaction(state.currentUser.id, state.currentUser.name, state.currentUser.profileImageUrl, newReaction)
+                    } else existingWithoutMe
+                    p.copy(
+                        isLiked = newReaction != null,
+                        myReaction = newReaction,
+                        likesCount = newCount,
+                        reactions = updatedReactions
+                    )
+                } else p
+            }
+            val updatedVideoPosts = state.videoPosts.map { p ->
+                if (p.id == postId) {
+                    val prevHadReaction = p.myReaction != null
+                    val newCount = when {
+                        !prevHadReaction && newReaction != null -> p.likesCount + 1
+                        prevHadReaction && newReaction == null -> (p.likesCount - 1).coerceAtLeast(0)
+                        else -> p.likesCount
+                    }
+                    val existingWithoutMe = p.reactions.filter { it.userId != state.currentUser.id }
+                    val updatedReactions = if (newReaction != null) {
+                        existingWithoutMe + UserReaction(state.currentUser.id, state.currentUser.name, state.currentUser.profileImageUrl, newReaction)
+                    } else existingWithoutMe
+                    p.copy(
+                        isLiked = newReaction != null,
+                        myReaction = newReaction,
+                        likesCount = newCount,
+                        reactions = updatedReactions
+                    )
+                } else p
+            }
+            state.copy(
+                posts = updatedPosts,
+                videoPosts = updatedVideoPosts,
+                selectedPostForComments = if (state.selectedPostForComments?.id == postId) {
+                    updatedPosts.find { it.id == postId } ?: updatedVideoPosts.find { it.id == postId }
+                } else state.selectedPostForComments
+            )
+        }
+
+        viewModelScope.launch {
+            val liveResult = FeedInteractionApiService.reactToFeedItem(
+                post = post,
+                userId = _uiState.value.currentUser.id,
+                reactionType = finalReactionToSend
+            )
+            _uiState.update { state ->
+                val finalMyReaction = liveResult.myReaction
+                val finalCount = liveResult.reactionsCount
+                val finalLiked = finalMyReaction != null
+                val updatedPosts = state.posts.map { p ->
+                    if (p.id == postId) {
+                        p.copy(
+                            isLiked = finalLiked,
+                            myReaction = finalMyReaction,
+                            likesCount = finalCount,
+                            sharesCount = liveResult.sharesCount ?: p.sharesCount,
+                            commentsCount = liveResult.commentsCount ?: p.commentsCount
+                        )
+                    } else p
+                }
+                val updatedVideoPosts = state.videoPosts.map { p ->
+                    if (p.id == postId) {
+                        p.copy(
+                            isLiked = finalLiked,
+                            myReaction = finalMyReaction,
+                            likesCount = finalCount,
+                            sharesCount = liveResult.sharesCount ?: p.sharesCount,
+                            commentsCount = liveResult.commentsCount ?: p.commentsCount
+                        )
+                    } else p
+                }
+                state.copy(
+                    posts = updatedPosts,
+                    videoPosts = updatedVideoPosts,
+                    selectedPostForComments = if (state.selectedPostForComments?.id == postId) {
+                        updatedPosts.find { it.id == postId } ?: updatedVideoPosts.find { it.id == postId }
+                    } else state.selectedPostForComments
+                )
+            }
+        }
+    }
+
+    fun toggleSavePost(postId: Long) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        _uiState.update { state ->
+            state.copy(
+                posts = state.posts.map {
+                    if (it.id == postId) it.copy(isSaved = !it.isSaved) else it
+                }
+            )
+        }
+    }
+
+    fun toggleSaveReel(reelId: Long) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        _uiState.update { state ->
+            state.copy(
+                reels = state.reels.map {
+                    if (it.id == reelId) it.copy(isSaved = !it.isSaved) else it
+                }
+            )
+        }
+    }
+
+    fun removeSavedItem(itemId: Long) {
+        _uiState.update { state ->
+            state.copy(
+                posts = state.posts.map {
+                    if (it.id == itemId) it.copy(isSaved = false) else it
+                },
+                reels = state.reels.map {
+                    if (it.id == itemId) it.copy(isSaved = false) else it
+                }
+            )
+        }
+    }
+
+    fun toggleFollowUser(userId: Long) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val currentUid = _uiState.value.currentUser.id
+        if (userId <= 0L || userId == currentUid) return
+        var newFollowState = false
+        _uiState.update { state ->
+            val targetUser = state.users.find { it.id == userId }
+                ?: state.peopleYouMayKnow.find { it.id == userId }
+                ?: state.posts.find { it.author.id == userId || it.userId == userId }?.author
+                ?: (if (state.selectedUserProfile?.id == userId) state.selectedUserProfile else null)
+            val currentFollowing = targetUser?.isFollowing ?: false
+            val newFollowing = !currentFollowing
+            newFollowState = newFollowing
+            val newCount = if (newFollowing) {
+                (targetUser?.followersCount ?: 0) + 1
+            } else {
+                ((targetUser?.followersCount ?: 1) - 1).coerceAtLeast(0)
+            }
+
+            val updatedUsers = state.users.map { user ->
+                if (user.id == userId) {
+                    user.copy(isFollowing = newFollowing, followersCount = newCount)
+                } else user
+            }
+            val updatedPymk = state.peopleYouMayKnow.map { user ->
+                if (user.id == userId) {
+                    user.copy(isFollowing = newFollowing, followersCount = newCount)
+                } else user
+            }
+            val updatedSelectedProfile = if (state.selectedUserProfile?.id == userId) {
+                state.selectedUserProfile.copy(isFollowing = newFollowing, followersCount = newCount)
+            } else state.selectedUserProfile
+
+            val updatedPosts = state.posts.map { post ->
+                if (post.author.id == userId || post.userId == userId) {
+                    post.copy(author = post.author.copy(isFollowing = newFollowing, followersCount = newCount))
+                } else post
+            }
+            val updatedVideoPosts = state.videoPosts.map { post ->
+                if (post.author.id == userId || post.userId == userId) {
+                    post.copy(author = post.author.copy(isFollowing = newFollowing, followersCount = newCount))
+                } else post
+            }
+            val updatedStories = state.stories.map { story ->
+                if (story.author.id == userId) {
+                    story.copy(author = story.author.copy(isFollowing = newFollowing, followersCount = newCount))
+                } else story
+            }
+            val updatedUserProfPosts = state.userProfilePosts.mapValues { (_, postList) ->
+                postList.map { post ->
+                    if (post.author.id == userId || post.userId == userId) {
+                        post.copy(author = post.author.copy(isFollowing = newFollowing, followersCount = newCount))
+                    } else post
+                }
+            }
+
+            val updatedCurrentUser = if (newFollowState) {
+                state.currentUser.copy(followingCount = state.currentUser.followingCount + 1)
+            } else {
+                state.currentUser.copy(followingCount = (state.currentUser.followingCount - 1).coerceAtLeast(0))
+            }
+
+            state.copy(
+                currentUser = updatedCurrentUser,
+                users = updatedUsers,
+                peopleYouMayKnow = updatedPymk,
+                selectedUserProfile = updatedSelectedProfile,
+                posts = updatedPosts,
+                videoPosts = updatedVideoPosts,
+                stories = updatedStories,
+                userProfilePosts = updatedUserProfPosts
+            )
+        }
+        viewModelScope.launch {
+            if (newFollowState) {
+                UserApiService.followUser(currentUid, userId)
+            } else {
+                UserApiService.unfollowUser(currentUid, userId)
+            }
+            val targetData = UserApiService.fetchUserFollowData(userId)
+            val meData = UserApiService.fetchUserFollowData(currentUid)
+            _uiState.update { state ->
+                var nextState = state
+                if (targetData != null) {
+                    val isF = targetData.followers.contains(currentUid)
+                    val followersCount = targetData.followers.size
+                    val followingCount = targetData.following.size
+
+                    nextState = nextState.copy(
+                        users = nextState.users.map {
+                            if (it.id == userId) it.copy(
+                                followersCount = followersCount,
+                                followingCount = followingCount,
+                                isFollowing = isF
+                            ) else it
+                        },
+                        peopleYouMayKnow = nextState.peopleYouMayKnow.map {
+                            if (it.id == userId) it.copy(
+                                followersCount = followersCount,
+                                followingCount = followingCount,
+                                isFollowing = isF
+                            ) else it
+                        },
+                        selectedUserProfile = if (nextState.selectedUserProfile?.id == userId) {
+                            nextState.selectedUserProfile?.copy(
+                                followersCount = followersCount,
+                                followingCount = followingCount,
+                                isFollowing = isF
+                            )
+                        } else nextState.selectedUserProfile,
+                        posts = nextState.posts.map { post ->
+                            if (post.author.id == userId || post.userId == userId) {
+                                post.copy(author = post.author.copy(
+                                    followersCount = followersCount,
+                                    followingCount = followingCount,
+                                    isFollowing = isF
+                                ))
+                            } else post
+                        },
+                        videoPosts = nextState.videoPosts.map { post ->
+                            if (post.author.id == userId || post.userId == userId) {
+                                post.copy(author = post.author.copy(
+                                    followersCount = followersCount,
+                                    followingCount = followingCount,
+                                    isFollowing = isF
+                                ))
+                            } else post
+                        },
+                        stories = nextState.stories.map { story ->
+                            if (story.author.id == userId) {
+                                story.copy(author = story.author.copy(
+                                    followersCount = followersCount,
+                                    followingCount = followingCount,
+                                    isFollowing = isF
+                                ))
+                            } else story
+                        }
+                    )
+                }
+                if (meData != null) {
+                    nextState = nextState.copy(
+                        currentUser = nextState.currentUser.copy(
+                            followersCount = meData.followers.size,
+                            followingCount = meData.following.size
+                        ),
+                        selectedUserProfile = if (nextState.selectedUserProfile?.id == currentUid) {
+                            nextState.selectedUserProfile?.copy(
+                                followersCount = meData.followers.size,
+                                followingCount = meData.following.size
+                            )
+                        } else nextState.selectedUserProfile
+                    )
+                }
+                nextState
+            }
+        }
+    }
+
+    fun addComment(postId: Long, commentText: String) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        if (commentText.isBlank()) return
+        val post = _uiState.value.posts.find { it.id == postId }
+            ?: _uiState.value.videoPosts.find { it.id == postId }
+            ?: _uiState.value.selectedPostForComments
+        val newComment = Comment(
+            id = System.currentTimeMillis(),
+            author = _uiState.value.currentUser,
+            text = commentText.trim(),
+            timestamp = "Just now"
+        )
+        _uiState.update { state ->
+            val updatedPosts = state.posts.map { p ->
+                if (p.id == postId) {
+                    p.copy(
+                        comments = listOf(newComment) + p.comments,
+                        commentsCount = p.commentsCount + 1
+                    )
+                } else p
+            }
+            val updatedVideoPosts = state.videoPosts.map { p ->
+                if (p.id == postId) {
+                    p.copy(
+                        comments = listOf(newComment) + p.comments,
+                        commentsCount = p.commentsCount + 1
+                    )
+                } else p
+            }
+            val isProd = post?.product != null || post?.postType == "product"
+            val pid = post?.product?.id ?: postId
+            val updatedProducts = if (isProd) {
+                state.products.map { prod ->
+                    if (prod.id == pid) prod.copy(commentsCount = prod.commentsCount + 1) else prod
+                }
+            } else state.products
+            state.copy(
+                posts = updatedPosts,
+                videoPosts = updatedVideoPosts,
+                products = updatedProducts,
+                selectedPostForComments = updatedPosts.find { it.id == postId } ?: updatedVideoPosts.find { it.id == postId }
+            )
+        }
+
+        val targetPost = post ?: Post(id = postId, author = _uiState.value.currentUser, content = "", timestamp = "")
+        viewModelScope.launch {
+            val liveComment = FeedInteractionApiService.addComment(
+                post = targetPost,
+                userId = _uiState.value.currentUser.id,
+                text = commentText.trim()
+            )
+            if (liveComment != null) {
+                _uiState.update { state ->
+                    val updatedPosts = state.posts.map { p ->
+                        if (p.id == postId) {
+                            p.copy(
+                                comments = listOf(liveComment) + p.comments.filter { it.id != newComment.id }
+                            )
+                        } else p
+                    }
+                    val updatedVideoPosts = state.videoPosts.map { p ->
+                        if (p.id == postId) {
+                            p.copy(
+                                comments = listOf(liveComment) + p.comments.filter { it.id != newComment.id }
+                            )
+                        } else p
+                    }
+                    val updatedSel = if (state.selectedPostForComments?.id == postId) {
+                        state.selectedPostForComments?.copy(
+                            comments = listOf(liveComment) + (state.selectedPostForComments?.comments?.filter { it.id != newComment.id } ?: emptyList())
+                        )
+                    } else state.selectedPostForComments
+                    state.copy(
+                        posts = updatedPosts,
+                        videoPosts = updatedVideoPosts,
+                        selectedPostForComments = updatedSel
+                    )
+                }
+            }
+        }
+    }
+
+    fun deleteComment(postId: Long, commentId: Long) {
+        val post = _uiState.value.posts.find { it.id == postId }
+            ?: _uiState.value.videoPosts.find { it.id == postId }
+            ?: _uiState.value.selectedPostForComments
+        _uiState.update { state ->
+            val updatedPosts = state.posts.map { p ->
+                if (p.id == postId) {
+                    val remaining = p.comments.filter { it.id != commentId }
+                    p.copy(
+                        comments = remaining,
+                        commentsCount = (p.commentsCount - 1).coerceAtLeast(0)
+                    )
+                } else p
+            }
+            val updatedVideoPosts = state.videoPosts.map { p ->
+                if (p.id == postId) {
+                    val remaining = p.comments.filter { it.id != commentId }
+                    p.copy(
+                        comments = remaining,
+                        commentsCount = (p.commentsCount - 1).coerceAtLeast(0)
+                    )
+                } else p
+            }
+            state.copy(
+                posts = updatedPosts,
+                videoPosts = updatedVideoPosts,
+                selectedPostForComments = updatedPosts.find { it.id == postId } ?: updatedVideoPosts.find { it.id == postId }
+            )
+        }
+        val targetPost = post ?: Post(id = postId, author = _uiState.value.currentUser, content = "", timestamp = "")
+        viewModelScope.launch {
+            FeedInteractionApiService.deleteComment(
+                itemType = targetPost.postType,
+                commentId = commentId,
+                userId = _uiState.value.currentUser.id,
+                parentId = targetPost.id
+            )
+        }
+    }
+
+    fun likeComment(commentId: Long) {
+        likeComment(0L, commentId)
+    }
+
+    fun likeComment(postId: Long, commentId: Long) {
+        val post = _uiState.value.posts.find { it.id == postId }
+            ?: _uiState.value.videoPosts.find { it.id == postId }
+            ?: _uiState.value.selectedPostForComments
+        _uiState.update { state ->
+            fun updateCommentList(comments: List<Comment>): List<Comment> {
+                return comments.map { c ->
+                    if (c.id == commentId) {
+                        val newLiked = !c.isLiked
+                        val newCount = if (newLiked) c.likesCount + 1 else (c.likesCount - 1).coerceAtLeast(0)
+                        c.copy(isLiked = newLiked, likesCount = newCount)
+                    } else c
+                }
+            }
+            val updatedPosts = state.posts.map { p ->
+                if (postId <= 0L || p.id == postId) p.copy(comments = updateCommentList(p.comments)) else p
+            }
+            val updatedVideoPosts = state.videoPosts.map { p ->
+                if (postId <= 0L || p.id == postId) p.copy(comments = updateCommentList(p.comments)) else p
+            }
+            state.copy(
+                posts = updatedPosts,
+                videoPosts = updatedVideoPosts,
+                selectedPostForComments = state.selectedPostForComments?.let {
+                    if (postId <= 0L || it.id == postId) it.copy(comments = updateCommentList(it.comments)) else it
+                }
+            )
+        }
+        val targetPost = post ?: Post(id = postId, author = _uiState.value.currentUser, content = "", timestamp = "")
+        viewModelScope.launch {
+            FeedInteractionApiService.likeComment(
+                itemType = targetPost.postType,
+                commentId = commentId,
+                userId = _uiState.value.currentUser.id
+            )
+        }
+    }
+
+    fun editComment(commentId: Long, newText: String) {
+        viewModelScope.launch {
+            VideosApiService.editComment(commentId, _uiState.value.currentUser.id, newText)
+        }
+    }
+
+    fun createPost(
+        context: Context? = null,
+        content: String,
+        mediaUrl: String? = null,
+        feeling: String? = null,
+        mediaUrls: List<String> = emptyList(),
+        location: String? = null,
+        backgroundStyle: String? = null,
+        taggedUsers: List<Long> = emptyList()
+    ) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val trimmed = content.trim()
+        val allMedia = if (mediaUrls.isNotEmpty()) mediaUrls else if (!mediaUrl.isNullOrBlank()) listOf(mediaUrl) else emptyList()
+        if (trimmed.isBlank() && allMedia.isEmpty() && backgroundStyle.isNullOrBlank()) return
+
+        val currentUser = _uiState.value.currentUser
+
+        var hasVideos = false
+        var hasPhotos = false
+        if (context != null) {
+            for (m in allMedia) {
+                if (m.startsWith("content://") || m.startsWith("file://")) {
+                    val mime = try { context.contentResolver.getType(Uri.parse(m)) ?: "" } catch (_: Exception) { "" }
+                    if (mime.startsWith("video") || m.contains(".mp4") || m.contains("video")) {
+                        hasVideos = true
+                    } else {
+                        hasPhotos = true
+                    }
+                } else if (PostsApiService.isValidVideoUrl(m)) {
+                    hasVideos = true
+                } else {
+                    hasPhotos = true
+                }
+            }
+        } else {
+            hasVideos = allMedia.any { PostsApiService.isValidVideoUrl(it) }
+            hasPhotos = allMedia.isNotEmpty() && !hasVideos
+        }
+
+        // Preview for the progress banner
+        val previewUrl = allMedia.firstOrNull()
+
+        // 1. Initial State: 15% - "Uploading your post…"
+        _uiState.update { state ->
+            state.copy(
+                showCreatePostDialog = false,
+                postUploadState = PostUploadState(
+                    isUploading = true,
+                    progress = 15f,
+                    title = "Uploading your post…",
+                    secondaryStatus = if (hasPhotos) {
+                        "Please wait while your photos are being uploaded."
+                    } else if (hasVideos) {
+                        "Uploading and processing video..."
+                    } else {
+                        "Publishing post to your timeline..."
+                    },
+                    previewUrl = previewUrl,
+                    isSuccess = false
+                )
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                var finalMediaUrl: String? = null
+                var finalMediaType: String? = null
+                val finalMediaUrls = mutableListOf<String>()
+                val finalMediaTypes = mutableListOf<String>()
+                val finalMediaMeta = mutableListOf<MediaMetaItem>()
+                var primaryVideoUrl: String? = null
+                var primaryThumbUrl: String? = null
+
+                if (hasPhotos && !hasVideos && allMedia.isNotEmpty() && context != null) {
+                    // ==========================================
+                    // BRANCH 1: IMAGE(S) — Compression -> R2
+                    // ==========================================
+                    _uiState.update { state ->
+                        state.copy(
+                            postUploadState = state.postUploadState?.copy(
+                                progress = 30f,
+                                secondaryStatus = "Preparing and optimizing photos..."
+                            )
+                        )
+                    }
+
+                    var completedFiles = 0
+                    for ((idx, item) in allMedia.withIndex()) {
+                        if (item.startsWith("content://") || item.startsWith("file://")) {
+                            val uri = Uri.parse(item)
+                            val bundleResult = MediaUploadHelper.buildImageBundleAndUpload(context, uri)
+                            if (bundleResult != null) {
+                                val feed = bundleResult.feedUrl
+                                val thumb = bundleResult.thumbUrl
+                                val full = bundleResult.originalUrl
+                                finalMediaUrls.add(feed)
+                                finalMediaTypes.add("image")
+                                finalMediaMeta.add(
+                                    MediaMetaItem(
+                                        thumb = thumb,
+                                        feed = feed,
+                                        full = full,
+                                        original = full,
+                                        thumbnailUrl = thumb,
+                                        resolution720 = feed,
+                                        resolution1080 = full,
+                                        type = "image",
+                                        width = bundleResult.width,
+                                        height = bundleResult.height
+                                    )
+                                )
+                            } else {
+                                finalMediaUrls.add(item)
+                                finalMediaTypes.add("image")
+                                finalMediaMeta.add(
+                                    MediaMetaItem(
+                                        thumb = item,
+                                        feed = item,
+                                        full = item,
+                                        type = "image"
+                                    )
+                                )
+                            }
+                        } else {
+                            finalMediaUrls.add(item)
+                            finalMediaTypes.add("image")
+                            finalMediaMeta.add(
+                                MediaMetaItem(
+                                    thumb = item,
+                                    feed = item,
+                                    full = item,
+                                    type = "image"
+                                )
+                            )
+                        }
+
+                        completedFiles++
+                        val pct = minOf(85f, 30f + ((completedFiles.toFloat() / allMedia.size) * 55f))
+                        _uiState.update { state ->
+                            state.copy(
+                                postUploadState = state.postUploadState?.copy(
+                                    progress = pct,
+                                    secondaryStatus = if (allMedia.size > 1) {
+                                        "Uploaded photo $completedFiles of ${allMedia.size}..."
+                                    } else {
+                                        "Please wait while your photos are being uploaded."
+                                    }
+                                )
+                            )
+                        }
+                    }
+
+                    finalMediaUrl = finalMediaUrls.firstOrNull()
+                    finalMediaType = "image"
+
+                } else if (hasVideos && allMedia.isNotEmpty() && context != null) {
+                    // ==========================================
+                    // BRANCH 2: VIDEO(S) — R2 (no /api/reels call)
+                    // ==========================================
+                    _uiState.update { state ->
+                        state.copy(
+                            postUploadState = state.postUploadState?.copy(
+                                progress = 40f,
+                                secondaryStatus = "Uploading and processing video..."
+                            )
+                        )
+                    }
+
+                    val videoItem = allMedia.find {
+                        val mime = try { context.contentResolver.getType(Uri.parse(it)) ?: "" } catch (_: Exception) { "" }
+                        mime.startsWith("video") || PostsApiService.isValidVideoUrl(it)
+                    } ?: allMedia.first()
+
+                    if (videoItem.startsWith("content://") || videoItem.startsWith("file://")) {
+                        val uri = Uri.parse(videoItem)
+                        val videoResult = MediaUploadHelper.processAndUploadVideo(
+                            context = context,
+                            uri = uri
+                        ) { statusMsg, progressPct ->
+                            _uiState.update { state ->
+                                state.copy(
+                                    postUploadState = state.postUploadState?.copy(
+                                        progress = 40f + (progressPct * 0.45f), // 40% to 85%
+                                        secondaryStatus = statusMsg
+                                    )
+                                )
+                            }
+                        }
+
+                        if (videoResult != null) {
+                            val origUrl = videoResult.originalUrl
+                            val high1080Url = videoResult.url1080
+                            val low720Url = videoResult.url720
+                            val thumbUrl = videoResult.thumbUrl
+                            val primaryPlaybackUrl = low720Url.ifBlank { origUrl }
+
+                            primaryVideoUrl = primaryPlaybackUrl
+                            primaryThumbUrl = thumbUrl
+
+                            finalMediaUrl = primaryPlaybackUrl
+                            finalMediaType = "video"
+
+                            if (!thumbUrl.isNullOrBlank()) {
+                                finalMediaUrls.addAll(listOf(origUrl, high1080Url, low720Url, thumbUrl))
+                                finalMediaTypes.addAll(listOf("video", "video", "video", "image"))
+                            } else {
+                                finalMediaUrls.addAll(listOf(origUrl, high1080Url, low720Url))
+                                finalMediaTypes.addAll(listOf("video", "video", "video"))
+                            }
+
+                            finalMediaMeta.add(
+                                MediaMetaItem(
+                                    original = origUrl,
+                                    resolution1080 = high1080Url,
+                                    resolution720 = low720Url,
+                                    thumbnailUrl = thumbUrl,
+                                    thumb = thumbUrl,
+                                    feed = low720Url,
+                                    full = high1080Url,
+                                    type = "video",
+                                    width = videoResult.width,
+                                    height = videoResult.height,
+                                    duration = videoResult.durationSec
+                                )
+                            )
+                        } else {
+                            finalMediaUrl = videoItem
+                            finalMediaType = "video"
+                            primaryVideoUrl = videoItem
+                            finalMediaUrls.add(videoItem)
+                            finalMediaTypes.add("video")
+                            finalMediaMeta.add(MediaMetaItem(original = videoItem, type = "video"))
+                        }
+                    } else {
+                        primaryVideoUrl = videoItem
+                        finalMediaUrl = videoItem
+                        finalMediaType = "video"
+                        finalMediaUrls.add(videoItem)
+                        finalMediaTypes.add("video")
+                        finalMediaMeta.add(MediaMetaItem(original = videoItem, type = "video"))
+                    }
+                } else if (allMedia.isNotEmpty()) {
+                    // Already uploaded HTTP URLs
+                    finalMediaUrls.addAll(allMedia)
+                    val isVid = allMedia.any { PostsApiService.isValidVideoUrl(it) }
+                    finalMediaType = if (isVid) "video" else "image"
+                    finalMediaUrl = allMedia.firstOrNull()
+                    if (isVid) primaryVideoUrl = finalMediaUrl
+                    finalMediaTypes.addAll(allMedia.map { if (isVid) "video" else "image" })
+                    finalMediaMeta.add(MediaMetaItem(original = finalMediaUrl, type = finalMediaType))
+                }
+
+                // ==========================================
+                // 90%: Publishing post to timeline...
+                // ==========================================
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            progress = 90f,
+                            secondaryStatus = "Publishing post to your timeline..."
+                        )
+                    )
+                }
+
+                val postType = if (finalMediaType == "video") "video" else if (finalMediaType == "image") "image" else "text"
+
+                // SINGLE FINAL INSERT — images AND videos use /api/posts
+                val livePost = PostsApiService.createPost(
+                    userId = currentUser.id,
+                    content = trimmed,
+                    mediaUrl = finalMediaUrl,
+                    mediaUrls = finalMediaUrls,
+                    mediaType = finalMediaType,
+                    mediaTypes = finalMediaTypes,
+                    videoUrl = primaryVideoUrl,
+                    thumbnailUrl = primaryThumbUrl,
+                    mediaMeta = finalMediaMeta,
+                    feeling = feeling,
+                    location = location,
+                    background = backgroundStyle,
+                    taggedUsers = taggedUsers,
+                    type = postType,
+                    visibility = "public"
+                )
+
+                val newPost = Post(
+                    id = livePost?.id ?: System.currentTimeMillis(),
+                    author = currentUser,
+                    content = trimmed,
+                    mediaUrl = finalMediaUrl,
+                    mediaUrls = finalMediaUrls,
+                    mediaTypes = finalMediaTypes,
+                    mediaMeta = finalMediaMeta,
+                    timestamp = "Just now",
+                    feeling = feeling,
+                    location = location,
+                    backgroundStyle = backgroundStyle,
+                    taggedUsers = taggedUsers,
+                    postType = postType,
+                    videoUrl = primaryVideoUrl,
+                    mediaType = finalMediaType,
+                    likesCount = 0,
+                    commentsCount = 0,
+                    sharesCount = 0
+                )
+
+                _uiState.update { state ->
+                    val resolvedPost = (livePost?.copy(author = currentUser) ?: newPost)
+                    state.copy(
+                        posts = listOf(resolvedPost) + state.posts.filter { it.id != resolvedPost.id },
+                        postUploadState = state.postUploadState?.copy(
+                            isUploading = false,
+                            isSuccess = true,
+                            progress = 100f,
+                            title = "Post uploaded successfully!",
+                            secondaryStatus = "Your post is now visible on your timeline."
+                        )
+                    )
+                }
+
+                // Auto-clear success banner after 2.8s matching web
+                delay(2800)
+                _uiState.update { it.copy(postUploadState = null) }
+
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            isUploading = false,
+                            isSuccess = false,
+                            progress = 0f,
+                            title = "Upload failed",
+                            secondaryStatus = e.message ?: "Failed to upload files. Please try again.",
+                            error = e.message ?: "Upload error"
+                        )
+                    )
+                }
+                delay(4000)
+                _uiState.update { it.copy(postUploadState = null) }
+            }
+        }
+    }
+
+    fun dismissPostUpload() {
+        _uiState.update { it.copy(postUploadState = null) }
+    }
+
+    fun sharePost(postId: Long, destination: String = "feed", message: String = "") {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val post = _uiState.value.posts.find { it.id == postId } ?: _uiState.value.videoPosts.find { it.id == postId }
+        if (post == null) return
+
+        _uiState.update { state ->
+            val updatedPosts = state.posts.map { p ->
+                if (p.id == postId) {
+                    p.copy(sharesCount = p.sharesCount + 1)
+                } else p
+            }
+            val updatedVideoPosts = state.videoPosts.map { p ->
+                if (p.id == postId) {
+                    p.copy(sharesCount = p.sharesCount + 1)
+                } else p
+            }
+            val isProd = post.product != null || post.postType == "product"
+            val pid = post.product?.id ?: postId
+            val updatedProducts = if (isProd) {
+                state.products.map { prod ->
+                    if (prod.id == pid) prod.copy(sharesCount = prod.sharesCount + 1) else prod
+                }
+            } else state.products
+            state.copy(posts = updatedPosts, videoPosts = updatedVideoPosts, products = updatedProducts)
+        }
+
+        viewModelScope.launch {
+            val liveShare = FeedInteractionApiService.shareItem(
+                post = post,
+                userId = _uiState.value.currentUser.id,
+                destination = destination,
+                message = message
+            )
+            _uiState.update { state ->
+                val finalSharesCount = liveShare.sharesCount ?: (post.sharesCount + 1)
+                val updatedPosts = state.posts.map { p ->
+                    if (p.id == postId) p.copy(sharesCount = finalSharesCount) else p
+                }
+                val updatedVideoPosts = state.videoPosts.map { p ->
+                    if (p.id == postId) p.copy(sharesCount = finalSharesCount) else p
+                }
+                val withSharedPost = if (liveShare.newPost != null && destination == "feed") {
+                    val shared = enrichPostsWithAuthors(listOf(liveShare.newPost), state.users).firstOrNull() ?: liveShare.newPost
+                    listOf(shared) + updatedPosts.filter { it.id != shared.id }
+                } else updatedPosts
+                state.copy(posts = withSharedPost, videoPosts = updatedVideoPosts)
+            }
+        }
+    }
+
+    fun deletePost(postId: Long) {
+        val post = _uiState.value.posts.find { it.id == postId }
+        val pid = post?.product?.id ?: postId
+        _uiState.update { state ->
+            state.copy(
+                posts = state.posts.filterNot { it.id == postId },
+                products = if (post?.product != null || post?.postType == "product") state.products.filterNot { it.id == pid } else state.products
+            )
+        }
+        if (post != null && (post.product != null || post.postType == "product")) {
+            viewModelScope.launch {
+                MarketplaceApiService.deleteProduct(pid, _uiState.value.currentUser.id)
+            }
+        }
+    }
+
+    fun editPost(postId: Long, newContent: String) {
+        val post = _uiState.value.posts.find { it.id == postId }
+        val pid = post?.product?.id ?: postId
+        _uiState.update { state ->
+            val updated = state.posts.map { p ->
+                if (p.id == postId) p.copy(content = newContent) else p
+            }
+            val updatedProducts = state.products.map { prod ->
+                if (prod.id == pid) prod.copy(description = newContent) else prod
+            }
+            state.copy(posts = updated, products = updatedProducts)
+        }
+        if (post != null && (post.product != null || post.postType == "product")) {
+            viewModelScope.launch {
+                MarketplaceApiService.updateProduct(pid, mapOf("description" to newContent))
+            }
+        }
+    }
+
+    fun hidePost(postId: Long) {
+        _uiState.update { state ->
+            state.copy(posts = state.posts.filterNot { it.id == postId })
+        }
+    }
+
+    fun toggleLikeReel(reelId: Long) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        _uiState.update { state ->
+            state.copy(
+                reels = state.reels.map { reel ->
+                    if (reel.id == reelId) {
+                        val newLiked = !reel.isLiked
+                        val newLikes = if (newLiked) reel.likesCount + 1 else (reel.likesCount - 1).coerceAtLeast(0)
+                        reel.copy(isLiked = newLiked, likesCount = newLikes)
+                    } else reel
+                }
+            )
+        }
+    }
+
+    fun toggleSaveProduct(productId: Long) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        _uiState.update { state ->
+            state.copy(
+                products = state.products.map {
+                    if (it.id == productId) it.copy(isSaved = !it.isSaved) else it
+                }
+            )
+        }
+    }
+
+    fun createProduct(
+        context: Context? = null,
+        title: String,
+        price: Double,
+        discountPrice: Double? = null,
+        category: String,
+        location: String,
+        country: String = "TZ",
+        description: String,
+        imageUrl: String,
+        images: List<String> = emptyList(),
+        phone: String = ""
+    ) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val initialImages = if (images.isNotEmpty()) images else if (imageUrl.isNotBlank()) listOf(imageUrl) else listOf("https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=800")
+        val productTitle = title.trim().ifBlank { "Product" }
+
+        // 1. Initial State: 20% progress banner
+        _uiState.update { state ->
+            state.copy(
+                showCreateProductDialog = false,
+                postUploadState = PostUploadState(
+                    isUploading = true,
+                    progress = 20f,
+                    title = "Publishing \"$productTitle\"…",
+                    secondaryStatus = "Preparing product details...",
+                    previewUrl = initialImages.firstOrNull(),
+                    isSuccess = false
+                )
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                // 2. Upload any local image content uris to Cloudflare R2
+                val finalUploadedImages = mutableListOf<String>()
+                for ((index, img) in initialImages.withIndex()) {
+                    if ((img.startsWith("content://") || img.startsWith("file://")) && context != null) {
+                        _uiState.update { state ->
+                            state.copy(
+                                postUploadState = state.postUploadState?.copy(
+                                    progress = 30f + ((index + 1).toFloat() / initialImages.size * 25f),
+                                    secondaryStatus = "Uploading product photo ${index + 1} of ${initialImages.size}..."
+                                )
+                            )
+                        }
+                        val bundle = try {
+                            MediaUploadHelper.buildImageBundleAndUpload(context, Uri.parse(img))
+                        } catch (e: Exception) {
+                            null
+                        }
+                        if (bundle != null && bundle.feedUrl.isNotBlank()) {
+                            finalUploadedImages.add(bundle.feedUrl)
+                        } else {
+                            finalUploadedImages.add(img)
+                        }
+                    } else {
+                        finalUploadedImages.add(img)
+                    }
+                }
+
+                val primaryImage = finalUploadedImages.firstOrNull() ?: "https://images.unsplash.com/photo-1526170375885-4d8ecf77b99f?w=800"
+
+                // 3. Registering with Marketplace API
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            progress = 65f,
+                            secondaryStatus = "Registering product in Marketplace..."
+                        )
+                    )
+                }
+
+                val productToSend = Product(
+                    id = System.currentTimeMillis(),
+                    title = productTitle,
+                    price = price,
+                    discountPrice = discountPrice,
+                    category = category,
+                    location = location.trim(),
+                    country = country,
+                    currency = if (country.equals("TZ", ignoreCase = true)) "TZS" else "USD",
+                    imageUrl = primaryImage,
+                    images = finalUploadedImages,
+                    description = description.trim(),
+                    seller = _uiState.value.currentUser,
+                    phoneNumber = phone.ifBlank { "+255 712 345 678" },
+                    isFresh = true
+                )
+
+                val published = MarketplaceApiService.publishProduct(productToSend)
+                val finalProduct = published ?: productToSend
+
+                // 4. Inject into local state
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            progress = 85f,
+                            secondaryStatus = "Displaying product in feed & marketplace..."
+                        )
+                    )
+                }
+
+                val feedPost = Post(
+                    id = finalProduct.id,
+                    author = _uiState.value.currentUser,
+                    content = finalProduct.description,
+                    mediaUrl = finalProduct.imageUrl,
+                    mediaUrls = finalProduct.images,
+                    timestamp = "Just now",
+                    postType = "product",
+                    product = finalProduct
+                )
+
+                _uiState.update { state ->
+                    val userProfilePosts = state.userProfilePosts.toMutableMap()
+                    val myPosts = userProfilePosts[state.currentUser.id] ?: emptyList()
+                    userProfilePosts[state.currentUser.id] = listOf(feedPost) + myPosts
+                    state.copy(
+                        products = listOf(finalProduct) + state.products.filter { it.id != finalProduct.id },
+                        posts = listOf(feedPost) + state.posts.filter { it.id != feedPost.id },
+                        userProfilePosts = userProfilePosts
+                    )
+                }
+
+                // 5. Success
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            isUploading = false,
+                            isSuccess = true,
+                            progress = 100f,
+                            title = "Listing published!",
+                            secondaryStatus = "Your product is now live in the marketplace."
+                        )
+                    )
+                }
+
+                delay(2800)
+                _uiState.update { it.copy(postUploadState = null) }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            isUploading = false,
+                            isSuccess = false,
+                            progress = 0f,
+                            title = "Failed to publish listing",
+                            secondaryStatus = e.message ?: "Something went wrong. Please try again."
+                        )
+                    )
+                }
+                delay(3500)
+                _uiState.update { it.copy(postUploadState = null) }
+            }
+        }
+    }
+
+    fun toggleInterestedEvent(eventId: Long) {
+        _uiState.update { state ->
+            state.copy(
+                events = state.events.map { event ->
+                    if (event.id == eventId) {
+                        val isInt = !event.isInterested
+                        val newInterestedCount = if (isInt) event.interestedCount + 1 else (event.interestedCount - 1).coerceAtLeast(0)
+                        event.copy(isInterested = isInt, interestedCount = newInterestedCount)
+                    } else event
+                }
+            )
+        }
+    }
+
+    fun toggleGoingEvent(eventId: Long) {
+        _uiState.update { state ->
+            state.copy(
+                events = state.events.map { event ->
+                    if (event.id == eventId) {
+                        val isGoing = !event.isGoing
+                        val newGoingCount = if (isGoing) event.goingCount + 1 else (event.goingCount - 1).coerceAtLeast(0)
+                        event.copy(isGoing = isGoing, goingCount = newGoingCount)
+                    } else event
+                }
+            )
+        }
+    }
+
+    fun createEvent(
+        context: Context? = null,
+        title: String,
+        date: String,
+        location: String,
+        description: String,
+        imageUrl: String,
+        time: String = "",
+        visibility: String = "worldwide",
+        groupId: Long? = null,
+        groupName: String? = null
+    ) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val eventTitle = title.trim().ifBlank { "Event" }
+        val rawCover = imageUrl.trim().ifBlank { "https://images.unsplash.com/photo-1501281668745-f7f57925c3b4?w=800" }
+
+        // 1. Initial State: 20% progress banner
+        _uiState.update { state ->
+            state.copy(
+                showCreateEventDialog = false,
+                postUploadState = PostUploadState(
+                    isUploading = true,
+                    progress = 20f,
+                    title = "Publishing \"$eventTitle\"…",
+                    secondaryStatus = "Preparing event details...",
+                    previewUrl = rawCover,
+                    isSuccess = false
+                )
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                // 2. Upload cover if local uri
+                var finalCover = rawCover
+                if ((rawCover.startsWith("content://") || rawCover.startsWith("file://")) && context != null) {
+                    _uiState.update { state ->
+                        state.copy(
+                            postUploadState = state.postUploadState?.copy(
+                                progress = 40f,
+                                secondaryStatus = "Uploading event cover image..."
+                            )
+                        )
+                    }
+                    val bundle = try {
+                        MediaUploadHelper.buildImageBundleAndUpload(context, Uri.parse(rawCover))
+                    } catch (e: Exception) {
+                        null
+                    }
+                    if (bundle != null && bundle.feedUrl.isNotBlank()) {
+                        finalCover = bundle.feedUrl
+                    }
+                }
+
+                // Format ISO date
+                val d = date.substringBefore(" • ").trim()
+                val t = time.ifBlank { "12:00" }
+                val eventDateISO = try {
+                    if (d.matches(Regex("""\d{4}-\d{2}-\d{2}"""))) {
+                        "${d}T${t}:00.000Z"
+                    } else {
+                        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US).apply {
+                            timeZone = java.util.TimeZone.getTimeZone("UTC")
+                        }
+                        sdf.format(java.util.Date())
+                    }
+                } catch (_: Exception) {
+                    "${d}T12:00:00.000Z"
+                }
+
+                // 3. Register with API
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            progress = 55f,
+                            secondaryStatus = "Registering event with Feathered..."
+                        )
+                    )
+                }
+
+                val currentUser = _uiState.value.currentUser
+                val createdEvent = EventsApiService.createEvent(
+                    title = eventTitle,
+                    description = description.trim(),
+                    eventDateISO = eventDateISO,
+                    eventTime = t,
+                    location = location.trim(),
+                    visibility = visibility.ifBlank { "worldwide" },
+                    coverUrl = finalCover,
+                    creator = currentUser,
+                    groupId = groupId
+                )
+
+                val newEvent = createdEvent ?: Event(
+                    id = System.currentTimeMillis(),
+                    title = eventTitle,
+                    date = date,
+                    location = location.trim(),
+                    description = description.trim(),
+                    imageUrl = finalCover,
+                    organizer = currentUser,
+                    time = t,
+                    visibility = visibility,
+                    groupId = groupId,
+                    groupName = groupName,
+                    createdAt = "Just now"
+                )
+
+                // 4. Inject into feed & events state
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            progress = 85f,
+                            secondaryStatus = "Displaying event in feed..."
+                        )
+                    )
+                }
+
+                // In web App.tsx, Events are stored in events table and a feed post is injected locally:
+                val eventFeedPost = Post(
+                    id = newEvent.id,
+                    author = currentUser,
+                    content = newEvent.title,
+                    mediaUrl = newEvent.imageUrl,
+                    mediaUrls = if (newEvent.imageUrl.isNotBlank()) listOf(newEvent.imageUrl) else emptyList(),
+                    timestamp = "Just now",
+                    postType = "event",
+                    event = newEvent
+                )
+
+                _uiState.update { state ->
+                    state.copy(
+                        events = listOf(newEvent) + state.events.filter { it.id != newEvent.id },
+                        posts = listOf(eventFeedPost) + state.posts.filter { it.id != eventFeedPost.id }
+                    )
+                }
+
+                // 5. Success
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            isUploading = false,
+                            isSuccess = true,
+                            progress = 100f,
+                            title = "Event published!",
+                            secondaryStatus = "Your event is now live for attendees."
+                        )
+                    )
+                }
+
+                delay(2800)
+                _uiState.update { it.copy(postUploadState = null) }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            isUploading = false,
+                            isSuccess = false,
+                            progress = 0f,
+                            title = "Failed to create event",
+                            secondaryStatus = e.message ?: "Something went wrong. Please try again."
+                        )
+                    )
+                }
+                delay(3500)
+                _uiState.update { it.copy(postUploadState = null) }
+            }
+        }
+    }
+
+    fun openConversation(convId: String) {
+        _uiState.update { state ->
+            val updated = state.conversations.map {
+                if (it.id == convId) it.copy(unreadCount = 0) else it
+            }
+            state.copy(
+                conversations = updated,
+                activeConversationId = convId
+            )
+        }
+    }
+
+    fun closeConversation() {
+        _uiState.update { it.copy(activeConversationId = null) }
+    }
+
+    fun sendMessage(convId: String, text: String) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        if (text.isBlank()) return
+        val newMsg = ChatMessage(
+            id = System.currentTimeMillis().toString(),
+            senderId = _uiState.value.currentUser.id,
+            text = text.trim(),
+            timestamp = "Just now",
+            isMine = true
+        )
+        _uiState.update { state ->
+            val updated = state.conversations.map { conv ->
+                if (conv.id == convId) {
+                    conv.copy(
+                        lastMessage = text.trim(),
+                        lastTimestamp = "Just now",
+                        messages = conv.messages + newMsg
+                    )
+                } else conv
+            }
+            state.copy(conversations = updated)
+        }
+    }
+
+    fun sendAttachmentMessage(convId: String, attachment: com.unera.social.model.ChatAttachment, text: String = "") {
+        val newMsg = ChatMessage(
+            id = System.currentTimeMillis().toString(),
+            senderId = _uiState.value.currentUser.id,
+            text = text.trim(),
+            timestamp = "Just now",
+            isMine = true,
+            attachments = listOf(attachment)
+        )
+        _uiState.update { state ->
+            val updated = state.conversations.map { conv ->
+                if (conv.id == convId) {
+                    conv.copy(
+                        lastMessage = if (text.isNotBlank()) text.trim() else "📎 ${attachment.filename}",
+                        lastTimestamp = "Just now",
+                        messages = conv.messages + newMsg
+                    )
+                } else conv
+            }
+            state.copy(conversations = updated)
+        }
+    }
+
+    fun editChatMessage(convId: String, messageId: String, newText: String) {
+        _uiState.update { state ->
+            val updated = state.conversations.map { conv ->
+                if (conv.id == convId) {
+                    val updatedMsgs = conv.messages.map { msg ->
+                        if (msg.id == messageId) msg.copy(text = newText, isEdited = true) else msg
+                    }
+                    conv.copy(messages = updatedMsgs)
+                } else conv
+            }
+            state.copy(conversations = updated)
+        }
+    }
+
+    fun deleteChatMessage(convId: String, messageId: String) {
+        _uiState.update { state ->
+            val updated = state.conversations.map { conv ->
+                if (conv.id == convId) {
+                    conv.copy(messages = conv.messages.filterNot { it.id == messageId })
+                } else conv
+            }
+            state.copy(conversations = updated)
+        }
+    }
+
+    fun startConversationWithUser(user: User, product: Product? = null) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val existing = _uiState.value.conversations.find { it.participant.id == user.id }
+        val introMessage = if (product != null) {
+            "${product.title}: Hello, I am interested in this product. Is it still available? [product:${product.id}]"
+        } else null
+        
+        if (existing != null) {
+            if (introMessage != null) {
+                sendMessage(existing.id, introMessage)
+            }
+            openConversation(existing.id)
+            setScreen(Screen.MESSAGES)
+        } else {
+            val initialMsgs = if (introMessage != null) {
+                listOf(
+                    ChatMessage(
+                        id = System.currentTimeMillis().toString(),
+                        senderId = _uiState.value.currentUser.id,
+                        text = introMessage,
+                        timestamp = "Just now",
+                        isMine = true
+                    )
+                )
+            } else emptyList()
+
+            val newConv = Conversation(
+                id = "c_${System.currentTimeMillis()}",
+                participant = user,
+                lastMessage = introMessage ?: "Started a conversation",
+                lastTimestamp = "Just now",
+                unreadCount = 0,
+                messages = initialMsgs
+            )
+            _uiState.update { state ->
+                state.copy(
+                    conversations = listOf(newConv) + state.conversations,
+                    activeConversationId = newConv.id,
+                    currentScreen = Screen.MESSAGES,
+                    selectedProductForDetail = null
+                )
+            }
+        }
+
+        if (product != null) {
+            viewModelScope.launch {
+                MarketplaceApiService.sendProductInquiry(
+                    recipientId = user.id,
+                    productId = product.id,
+                    productTitle = product.title,
+                    userId = _uiState.value.currentUser.id
+                )
+            }
+        }
+    }
+
+    fun markNotificationsAsRead() {
+        _uiState.update { state ->
+            state.copy(
+                notifications = state.notifications.map { it.copy(isRead = true) }
+            )
+        }
+    }
+
+    fun markNotificationRead(id: String, isRead: Boolean = true) {
+        _uiState.update { state ->
+            state.copy(
+                notifications = state.notifications.map {
+                    if (it.id == id) it.copy(isRead = isRead) else it
+                }
+            )
+        }
+    }
+
+    fun deleteNotification(id: String) {
+        _uiState.update { state ->
+            state.copy(
+                notifications = state.notifications.filter { it.id != id }
+            )
+        }
+    }
+
+    fun acceptGroupInvite(notificationId: String, groupId: Long?) {
+        _uiState.update { state ->
+            state.copy(
+                notifications = state.notifications.map {
+                    if (it.id == notificationId) it.copy(isRead = true) else it
+                }
+            )
+        }
+    }
+
+    fun declineGroupInvite(notificationId: String, groupId: Long?) {
+        _uiState.update { state ->
+            state.copy(
+                notifications = state.notifications.map {
+                    if (it.id == notificationId) it.copy(isRead = true) else it
+                }
+            )
+        }
+    }
+
+    fun updateBio(newBio: String) {
+        _uiState.update { state ->
+            val updatedUser = state.currentUser.copy(bio = newBio.trim())
+            state.copy(
+                currentUser = updatedUser,
+                selectedUserProfile = if (state.selectedUserProfile?.id == updatedUser.id) updatedUser else state.selectedUserProfile
+            )
+        }
+    }
+
+    fun updateUserDetails(
+        bio: String,
+        work: String,
+        education: String,
+        location: String,
+        website: String,
+        coverImageUrl: String? = null,
+        profileImageUrl: String? = null
+    ) {
+        _uiState.update { state ->
+            val updatedUser = state.currentUser.copy(
+                bio = bio.trim(),
+                work = work.trim(),
+                education = education.trim(),
+                location = location.trim(),
+                website = website.trim(),
+                coverImageUrl = coverImageUrl ?: state.currentUser.coverImageUrl,
+                profileImageUrl = profileImageUrl ?: state.currentUser.profileImageUrl
+            )
+            state.copy(
+                currentUser = updatedUser,
+                selectedUserProfile = if (state.selectedUserProfile?.id == updatedUser.id) updatedUser else state.selectedUserProfile
+            )
+        }
+    }
+
+    fun updateFullProfileDetails(
+        name: String,
+        bio: String,
+        work: String,
+        education: String,
+        location: String,
+        website: String,
+        gender: String,
+        birthDate: String
+    ) {
+        _uiState.update { state ->
+            val updatedUser = state.currentUser.copy(
+                name = name.ifBlank { state.currentUser.name }.trim(),
+                bio = bio.trim(),
+                work = work.trim(),
+                education = education.trim(),
+                location = location.trim(),
+                website = website.trim(),
+                gender = gender.trim(),
+                birthDate = birthDate.trim().ifBlank { state.currentUser.birthDate }
+            )
+            val updatedUsers = state.users.map { if (it.id == updatedUser.id) updatedUser else it }
+            state.copy(
+                currentUser = updatedUser,
+                users = updatedUsers,
+                selectedUserProfile = if (state.selectedUserProfile?.id == updatedUser.id) updatedUser else state.selectedUserProfile
+            )
+        }
+    }
+
+    fun changePassword(current: String, new: String): Boolean {
+        return true
+    }
+
+    fun deleteAccount() {
+        _uiState.update { state ->
+            val deletedUser = state.currentUser.copy(isDeleted = true, name = "[Deleted User]")
+            state.copy(
+                currentUser = deletedUser,
+                currentScreen = Screen.FEED
+            )
+        }
+    }
+
+    fun openUserProfile(user: User) {
+        _uiState.update { state ->
+            state.copy(
+                selectedUserProfile = user,
+                currentScreen = Screen.PROFILE
+            )
+        }
+        fetchUserProfilePosts(user.id)
+        viewModelScope.launch {
+            val followData = UserApiService.fetchUserFollowData(user.id)
+            if (followData != null) {
+                val currentUid = _uiState.value.currentUser.id
+                val isF = followData.followers.contains(currentUid)
+                _uiState.update { state ->
+                    val updatedProfile = if (state.selectedUserProfile?.id == user.id) {
+                        state.selectedUserProfile?.copy(
+                            followersCount = followData.followers.size,
+                            followingCount = followData.following.size,
+                            isFollowing = isF
+                        )
+                    } else state.selectedUserProfile
+                    state.copy(
+                        selectedUserProfile = updatedProfile,
+                        users = state.users.map {
+                            if (it.id == user.id) it.copy(
+                                followersCount = followData.followers.size,
+                                followingCount = followData.following.size,
+                                isFollowing = isF
+                            ) else it
+                        }
+                    )
+                }
+            }
+        }
+    }
+
+    fun openUserProfileById(userId: Long) {
+        val cached = _uiState.value.users.find { it.id == userId }
+        if (cached != null) {
+            openUserProfile(cached)
+        } else {
+            viewModelScope.launch {
+                val liveUser = VideosApiService.fetchUser(userId)
+                if (liveUser != null) {
+                    _uiState.update { state ->
+                        state.copy(users = (state.users + liveUser).distinctBy { it.id })
+                    }
+                    openUserProfile(liveUser)
+                } else {
+                    val fromPost = _uiState.value.posts.find { it.author.id == userId }?.author
+                        ?: _uiState.value.videoPosts.find { it.author.id == userId }?.author
+                    if (fromPost != null) {
+                        openUserProfile(fromPost)
+                    }
+                }
+            }
+        }
+    }
+
+    fun openCurrentUserProfile() {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val current = _uiState.value.currentUser
+        _uiState.update { state ->
+            state.copy(
+                selectedUserProfile = current,
+                currentScreen = Screen.PROFILE
+            )
+        }
+        fetchUserProfilePosts(current.id)
+        viewModelScope.launch {
+            val followData = UserApiService.fetchUserFollowData(current.id)
+            if (followData != null) {
+                _uiState.update { state ->
+                    val updatedCurrent = state.currentUser.copy(
+                        followersCount = followData.followers.size,
+                        followingCount = followData.following.size
+                    )
+                    state.copy(
+                        currentUser = updatedCurrent,
+                        selectedUserProfile = if (state.selectedUserProfile?.id == current.id) updatedCurrent else state.selectedUserProfile
+                    )
+                }
+            }
+        }
+    }
+
+    fun toggleVerifyUser(userId: Long) {
+        _uiState.update { state ->
+            val updatedUsers = state.users.map { u ->
+                if (u.id == userId) u.copy(isVerified = !u.isVerified) else u
+            }
+            val updatedCurrent = if (state.currentUser.id == userId) state.currentUser.copy(isVerified = !state.currentUser.isVerified) else state.currentUser
+            val updatedSelected = if (state.selectedUserProfile?.id == userId) state.selectedUserProfile.copy(isVerified = !state.selectedUserProfile.isVerified) else state.selectedUserProfile
+            state.copy(users = updatedUsers, currentUser = updatedCurrent, selectedUserProfile = updatedSelected)
+        }
+    }
+
+    fun suspendUser(userId: Long, duration: String, reason: String) {
+        val until = when (duration) {
+            "week" -> "In 7 days"
+            "month" -> "In 30 days"
+            else -> "Indefinitely"
+        }
+        _uiState.update { state ->
+            val updatedUsers = state.users.map { u ->
+                if (u.id == userId) u.copy(suspendedUntil = until, suspensionReason = reason) else u
+            }
+            val updatedSelected = if (state.selectedUserProfile?.id == userId) state.selectedUserProfile.copy(suspendedUntil = until, suspensionReason = reason) else state.selectedUserProfile
+            state.copy(users = updatedUsers, selectedUserProfile = updatedSelected)
+        }
+    }
+
+    fun unsuspendUser(userId: Long) {
+        _uiState.update { state ->
+            val updatedUsers = state.users.map { u ->
+                if (u.id == userId) u.copy(suspendedUntil = null, suspensionReason = null) else u
+            }
+            val updatedSelected = if (state.selectedUserProfile?.id == userId) state.selectedUserProfile.copy(suspendedUntil = null, suspensionReason = null) else state.selectedUserProfile
+            state.copy(users = updatedUsers, selectedUserProfile = updatedSelected)
+        }
+    }
+
+    fun toggleModeratorRole(userId: Long) {
+        _uiState.update { state ->
+            val updatedUsers = state.users.map { u ->
+                if (u.id == userId) {
+                    val nextRole = if (u.role == "moderator") "user" else "moderator"
+                    u.copy(role = nextRole)
+                } else u
+            }
+            val updatedSelected = if (state.selectedUserProfile?.id == userId) {
+                val nextRole = if (state.selectedUserProfile.role == "moderator") "user" else "moderator"
+                state.selectedUserProfile.copy(role = nextRole)
+            } else state.selectedUserProfile
+            state.copy(users = updatedUsers, selectedUserProfile = updatedSelected)
+        }
+    }
+
+    fun setSearchQuery(query: String) {
+        _uiState.update { it.copy(searchQuery = query) }
+    }
+
+    fun setShowCreatePostDialog(show: Boolean, initialPicker: String? = null) {
+        if (show && (_uiState.value.isGuest || !_uiState.value.isLoggedIn)) {
+            openAuth("login")
+            return
+        }
+        _uiState.update { it.copy(showCreatePostDialog = show, createPostInitialPicker = if (show) initialPicker else null) }
+    }
+
+    fun setSelectedPostForComments(post: Post?) {
+        _uiState.update { it.copy(selectedPostForComments = post) }
+        if (post != null) {
+            val pid = post.product?.id ?: post.id
+            if (post.product != null || post.postType == "product") {
+                viewModelScope.launch {
+                    val liveReviews = MarketplaceApiService.fetchProductReviews(pid, _uiState.value.currentUser.id)
+                    if (liveReviews.isNotEmpty()) {
+                        _uiState.update { state ->
+                            val updatedPosts = state.posts.map { p ->
+                                if (p.id == post.id) p.copy(comments = liveReviews, commentsCount = liveReviews.size) else p
+                            }
+                            val updatedSel = if (state.selectedPostForComments?.id == post.id) {
+                                state.selectedPostForComments?.copy(comments = liveReviews, commentsCount = liveReviews.size)
+                            } else state.selectedPostForComments
+                            state.copy(
+                                posts = updatedPosts,
+                                selectedPostForComments = updatedSel
+                            )
+                        }
+                    }
+                }
+            } else {
+                viewModelScope.launch {
+                    val liveComments = VideosApiService.fetchComments(post.id, _uiState.value.currentUser.id)
+                    if (liveComments.isNotEmpty()) {
+                        _uiState.update { state ->
+                            val updatedPosts = state.posts.map { p ->
+                                if (p.id == post.id) p.copy(comments = liveComments, commentsCount = liveComments.size) else p
+                            }
+                            val updatedVideoPosts = state.videoPosts.map { p ->
+                                if (p.id == post.id) p.copy(comments = liveComments, commentsCount = liveComments.size) else p
+                            }
+                            val updatedSel = if (state.selectedPostForComments?.id == post.id) {
+                                state.selectedPostForComments?.copy(comments = liveComments, commentsCount = liveComments.size)
+                            } else state.selectedPostForComments
+                            state.copy(
+                                posts = updatedPosts,
+                                videoPosts = updatedVideoPosts,
+                                selectedPostForComments = updatedSel
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fun setShowSearchDialog(show: Boolean) {
+        _uiState.update { it.copy(showSearchDialog = show) }
+    }
+
+    fun setShowNotificationsOverlay(show: Boolean) {
+        _uiState.update { it.copy(showNotificationsOverlay = show) }
+        if (show) markNotificationsAsRead()
+    }
+
+    fun setShowCreateEventDialog(show: Boolean) {
+        if (show && (_uiState.value.isGuest || !_uiState.value.isLoggedIn)) {
+            openAuth("login")
+            return
+        }
+        _uiState.update { it.copy(showCreateEventDialog = show) }
+    }
+
+    fun setShowCreateProductDialog(show: Boolean) {
+        if (show && (_uiState.value.isGuest || !_uiState.value.isLoggedIn)) {
+            openAuth("login")
+            return
+        }
+        _uiState.update { it.copy(showCreateProductDialog = show) }
+    }
+
+    fun setSelectedProductForDetail(product: Product?) {
+        _uiState.update { it.copy(selectedProductForDetail = product) }
+    }
+
+    fun openProductById(pid: Long) {
+        val existing = _uiState.value.products.find { it.id == pid }
+        if (existing != null) {
+            setSelectedProductForDetail(existing)
+        } else {
+            viewModelScope.launch {
+                val prod = MarketplaceApiService.fetchProductById(pid)
+                if (prod != null) {
+                    _uiState.update { it.copy(products = listOf(prod) + it.products) }
+                    setSelectedProductForDetail(prod)
+                }
+            }
+        }
+    }
+
+    fun openImageViewer(url: String?) {
+        _uiState.update { it.copy(fullScreenImageViewerUrl = url) }
+    }
+
+    fun closeImageViewer() {
+        _uiState.update { it.copy(fullScreenImageViewerUrl = null) }
+    }
+
+    fun setAppLoading(loading: Boolean) {
+        _uiState.update { it.copy(isAppLoading = loading) }
+    }
+
+    fun refreshStories() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isStoriesLoading = true) }
+            val viewerId = _uiState.value.currentUser.id
+            val liveStories = StoriesApiService.fetchStories(viewerId)
+            _uiState.update { it.copy(stories = liveStories, isStoriesLoading = false) }
+        }
+    }
+
+    fun setSelectedStory(story: Story?) {
+        _uiState.update { it.copy(selectedStory = story) }
+        if (story != null) {
+            val viewerId = _uiState.value.currentUser.id
+            viewModelScope.launch {
+                // 1. Record view
+                StoriesApiService.recordView(story.id, viewerId)
+                // 2. Fetch reactions
+                val reactionsData = StoriesApiService.fetchReactions(story.id, viewerId)
+                if (reactionsData != null) {
+                    _uiState.update { state ->
+                        state.copy(storyReactions = state.storyReactions + (story.id to reactionsData))
+                    }
+                }
+                // 3. Fetch comments
+                val comments = StoriesApiService.fetchComments(story.id, viewerId)
+                _uiState.update { state ->
+                    state.copy(storyComments = state.storyComments + (story.id to comments))
+                }
+                // 4. If owner, fetch viewers and analytics
+                if (story.author.id == viewerId) {
+                    val viewers = StoriesApiService.fetchViewers(story.id)
+                    val analytics = StoriesApiService.fetchAnalytics(story.id)
+                    _uiState.update { state ->
+                        val updatedViewers = state.storyViewers + (story.id to viewers)
+                        val updatedAnalytics = if (analytics != null) state.storyAnalytics + (story.id to analytics) else state.storyAnalytics
+                        state.copy(storyViewers = updatedViewers, storyAnalytics = updatedAnalytics)
+                    }
+                }
+            }
+        }
+    }
+
+    fun setShowCreateStoryDialog(show: Boolean) {
+        if (show && (_uiState.value.isGuest || !_uiState.value.isLoggedIn)) {
+            openAuth("login")
+            return
+        }
+        _uiState.update { it.copy(showCreateStoryDialog = show) }
+    }
+
+    fun createStory(
+        mediaUrl: String = "",
+        type: String = "image",
+        textContent: String = "",
+        mediaUrls: List<String> = emptyList(),
+        mediaTypes: List<String> = emptyList(),
+        mediaMeta: List<Map<String, Any?>> = emptyList(),
+        backgroundStyle: String = "linear-gradient(45deg, #1877F2, #0055FF)",
+        musicTitle: String? = null,
+        musicUrl: String? = null,
+        duration: Int = 90,
+        onSuccess: (() -> Unit)? = null,
+        onError: ((String) -> Unit)? = null
+    ) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            _uiState.update { it.copy(isStoriesLoading = true, showCreateStoryDialog = false) }
+            val finalMediaUrls = if (mediaUrls.isNotEmpty()) mediaUrls else if (mediaUrl.isNotBlank()) listOf(mediaUrl) else emptyList()
+            val finalMediaTypes = if (mediaTypes.isNotEmpty()) mediaTypes else if (mediaUrl.isNotBlank()) listOf(type) else emptyList()
+            val finalMediaMeta = if (mediaMeta.isNotEmpty()) mediaMeta else if (mediaUrl.isNotBlank()) {
+                listOf(mapOf(
+                    "thumb" to mediaUrl,
+                    "feed" to mediaUrl,
+                    "full" to mediaUrl,
+                    "type" to type
+                ))
+            } else emptyList()
+
+            val created = StoriesApiService.createStory(
+                userId = currentUserId,
+                type = type,
+                textContent = textContent.takeIf { it.isNotBlank() },
+                mediaUrl = mediaUrl.takeIf { it.isNotBlank() },
+                mediaUrls = finalMediaUrls,
+                mediaTypes = finalMediaTypes,
+                mediaMeta = finalMediaMeta,
+                backgroundStyle = backgroundStyle.takeIf { it.isNotBlank() },
+                musicUrl = musicUrl,
+                musicTitle = musicTitle,
+                duration = duration
+            )
+            if (created != null) {
+                val finalStory = if (created.author.id == currentUserId && created.author.name.isBlank()) {
+                    created.copy(author = _uiState.value.currentUser)
+                } else created
+
+                _uiState.update { state ->
+                    state.copy(
+                        stories = listOf(finalStory) + state.stories.filter { it.id != finalStory.id },
+                        isStoriesLoading = false
+                    )
+                }
+                onSuccess?.invoke()
+            } else {
+                refreshStories()
+                _uiState.update { it.copy(isStoriesLoading = false) }
+                onError?.invoke("Failed to post story. Please try again.")
+            }
+        }
+    }
+
+    /**
+     * Uploads media bundle (image or video) and calls createStory matching exact web implementation.
+     */
+    fun uploadStoryAndPost(
+        context: Context,
+        mediaUri: Uri?,
+        isVideo: Boolean,
+        type: String, // "text" or "media"
+        textContent: String,
+        backgroundStyle: String,
+        musicTitle: String?,
+        musicUrl: String? = null,
+        onSuccess: () -> Unit,
+        onError: (String) -> Unit
+    ) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+
+        val hasText = textContent.trim().isNotEmpty()
+        val hasMedia = mediaUri != null
+
+        if (!hasText && !hasMedia) {
+            onError("Please add text or media to your story")
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isStoriesLoading = true) }
+            try {
+                if (type == "text" || (hasText && !hasMedia)) {
+                    createStory(
+                        type = "text",
+                        textContent = textContent.trim(),
+                        backgroundStyle = backgroundStyle,
+                        musicTitle = musicTitle,
+                        musicUrl = musicUrl,
+                        onSuccess = {
+                            _uiState.update { it.copy(showCreateStoryDialog = false, isStoriesLoading = false) }
+                            onSuccess()
+                        },
+                        onError = { err ->
+                            _uiState.update { it.copy(isStoriesLoading = false) }
+                            onError(err)
+                        }
+                    )
+                    return@launch
+                }
+
+                if (mediaUri != null) {
+                    if (isVideo) {
+                        _uiState.update { it.copy(isStoriesLoading = false) }
+                        onError("Video stories are disabled. Only photos can be posted to stories.")
+                        return@launch
+                    }
+                    val bundle = MediaUploadHelper.uploadStoryImageBundle(context, mediaUri)
+
+                    if (bundle == null || bundle.mediaUrl.isBlank()) {
+                        _uiState.update { it.copy(isStoriesLoading = false) }
+                        onError("Failed to upload story image. Please check your connection and try again.")
+                        return@launch
+                    }
+
+                    createStory(
+                        mediaUrl = bundle.mediaUrl,
+                        type = "image",
+                        textContent = textContent.trim(),
+                        mediaUrls = bundle.mediaUrls,
+                        mediaTypes = bundle.mediaTypes,
+                        mediaMeta = bundle.mediaMeta,
+                        backgroundStyle = backgroundStyle,
+                        musicTitle = musicTitle,
+                        musicUrl = musicUrl,
+                        onSuccess = {
+                            _uiState.update { it.copy(showCreateStoryDialog = false, isStoriesLoading = false) }
+                            onSuccess()
+                        },
+                        onError = { err ->
+                            _uiState.update { it.copy(isStoriesLoading = false) }
+                            onError(err)
+                        }
+                    )
+                }
+            } catch (e: IllegalArgumentException) {
+                _uiState.update { it.copy(isStoriesLoading = false) }
+                onError(e.message ?: "Invalid story media")
+            } catch (e: Exception) {
+                _uiState.update { it.copy(isStoriesLoading = false) }
+                onError(e.message ?: "Failed to upload story")
+            }
+        }
+    }
+
+    fun deleteStory(storyId: Long) {
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            _uiState.update { state ->
+                val updated = state.stories.filter { it.id != storyId }
+                state.copy(
+                    stories = updated,
+                    selectedStory = if (state.selectedStory?.id == storyId) null else state.selectedStory
+                )
+            }
+            StoriesApiService.deleteStory(storyId, currentUserId)
+        }
+    }
+
+    fun reactToStory(storyId: Long, reaction: String) {
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            // Optimistic update
+            _uiState.update { state ->
+                val updated = state.stories.map { s ->
+                    if (s.id == storyId) {
+                        val isSame = s.myReaction == reaction
+                        s.copy(
+                            myReaction = if (isSame) null else reaction,
+                            reactionsCount = if (isSame) maxOf(0, s.reactionsCount - 1) else if (s.myReaction == null) s.reactionsCount + 1 else s.reactionsCount,
+                            isLiked = if (isSame) false else true
+                        )
+                    } else s
+                }
+                state.copy(
+                    stories = updated,
+                    selectedStory = state.selectedStory?.let { sel ->
+                        if (sel.id == storyId) {
+                            val isSame = sel.myReaction == reaction
+                            sel.copy(
+                                myReaction = if (isSame) null else reaction,
+                                reactionsCount = if (isSame) maxOf(0, sel.reactionsCount - 1) else if (sel.myReaction == null) sel.reactionsCount + 1 else sel.reactionsCount,
+                                isLiked = if (isSame) false else true
+                            )
+                        } else sel
+                    }
+                )
+            }
+            StoriesApiService.reactToStory(storyId, currentUserId, reaction)
+            val updatedReactions = StoriesApiService.fetchReactions(storyId, currentUserId)
+            if (updatedReactions != null) {
+                _uiState.update { state ->
+                    state.copy(storyReactions = state.storyReactions + (storyId to updatedReactions))
+                }
+            }
+        }
+    }
+
+    fun fetchStoryViewers(storyId: Long) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isStoryViewersLoading = true) }
+            val viewers = StoriesApiService.fetchViewers(storyId)
+            _uiState.update { state ->
+                state.copy(
+                    storyViewers = state.storyViewers + (storyId to viewers),
+                    isStoryViewersLoading = false
+                )
+            }
+        }
+    }
+
+    fun fetchStoryComments(storyId: Long) {
+        val viewerId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            _uiState.update { it.copy(isStoryCommentsLoading = true) }
+            val comments = StoriesApiService.fetchComments(storyId, viewerId)
+            _uiState.update { state ->
+                state.copy(
+                    storyComments = state.storyComments + (storyId to comments),
+                    isStoryCommentsLoading = false
+                )
+            }
+        }
+    }
+
+    fun addStoryComment(storyId: Long, content: String, imageUrl: String? = null, parentId: Long? = null) {
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            val created = StoriesApiService.addComment(storyId, currentUserId, content, imageUrl, parentId)
+            if (created != null) {
+                _uiState.update { state ->
+                    val existing = state.storyComments[storyId] ?: emptyList()
+                    val updated = existing + created
+                    state.copy(storyComments = state.storyComments + (storyId to updated))
+                }
+            } else {
+                fetchStoryComments(storyId)
+            }
+        }
+    }
+
+    fun toggleHideStoryComment(storyId: Long, commentId: Long, hide: Boolean) {
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            _uiState.update { state ->
+                val existing = state.storyComments[storyId] ?: emptyList()
+                val updated = existing.map { if (it.id == commentId) it.copy(isHidden = hide) else it }
+                state.copy(storyComments = state.storyComments + (storyId to updated))
+            }
+            StoriesApiService.toggleHideComment(storyId, currentUserId, commentId, if (hide) "hide" else "unhide")
+        }
+    }
+
+    fun deleteStoryComment(storyId: Long, commentId: Long) {
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            _uiState.update { state ->
+                val existing = state.storyComments[storyId] ?: emptyList()
+                val updated = existing.filter { it.id != commentId && it.parentId != commentId }
+                state.copy(storyComments = state.storyComments + (storyId to updated))
+            }
+            StoriesApiService.deleteComment(storyId, commentId, currentUserId)
+        }
+    }
+
+    fun likeStoryComment(commentId: Long) {
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            StoriesApiService.likeComment(commentId, currentUserId)
+        }
+    }
+
+    fun replyToStory(storyId: Long, text: String) {
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            StoriesApiService.replyToStory(storyId, currentUserId, text)
+        }
+    }
+
+    fun shareStory(storyId: Long, destination: String = "feed", message: String = "") {
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            StoriesApiService.shareStory(storyId, currentUserId, destination, message)
+        }
+    }
+
+    fun setShowMenuOverlay(show: Boolean) {
+        _uiState.update { it.copy(showMenuOverlay = show) }
+    }
+
+    // ==========================================
+    // F-MUSIC AUDIO PLAYER & CATALOG METHODS
+    // ==========================================
+
+    private var playbackJob: Job? = null
+    private var downloadJob: Job? = null
+
+    fun playTrack(track: AudioTrack) {
+        _uiState.update { state ->
+            val trackKey = "music:${track.id}"
+            val currentPlays = state.trackPlays[trackKey] ?: (state.songs.find { it.id == track.id }?.stats?.plays ?: 0L)
+            val isMyTrack = state.currentUser.id == track.uploaderId
+            state.copy(
+                currentAudioTrack = track,
+                isPlayingAudio = true,
+                audioPositionSeconds = 0,
+                audioDurationSeconds = if (track.duration > 0) track.duration else 180,
+                trackPlays = state.trackPlays + (trackKey to (currentPlays + 1L)),
+                myTotalPlays = if (isMyTrack) state.myTotalPlays + 1L else state.myTotalPlays
+            )
+        }
+        startPlaybackTicker()
+    }
+
+    private fun startPlaybackTicker() {
+        playbackJob?.cancel()
+        playbackJob = viewModelScope.launch {
+            while (true) {
+                delay(1000L)
+                val state = _uiState.value
+                if (!state.isPlayingAudio || state.currentAudioTrack == null) break
+
+                if (state.audioPositionSeconds >= state.audioDurationSeconds) {
+                    if (state.isRepeatEnabled) {
+                        _uiState.update { it.copy(audioPositionSeconds = 0) }
+                    } else {
+                        nextTrack()
+                    }
+                } else {
+                    _uiState.update { it.copy(audioPositionSeconds = it.audioPositionSeconds + 1) }
+                }
+            }
+        }
+    }
+
+    fun togglePlayAudio() {
+        val currentlyPlaying = _uiState.value.isPlayingAudio
+        if (currentlyPlaying) {
+            playbackJob?.cancel()
+            _uiState.update { it.copy(isPlayingAudio = false) }
+        } else {
+            if (_uiState.value.currentAudioTrack != null) {
+                _uiState.update { it.copy(isPlayingAudio = true) }
+                startPlaybackTicker()
+            }
+        }
+    }
+
+    fun seekAudio(seconds: Int) {
+        _uiState.update { state ->
+            state.copy(audioPositionSeconds = seconds.coerceIn(0, state.audioDurationSeconds))
+        }
+    }
+
+    fun nextTrack() {
+        val state = _uiState.value
+        val songs = state.songs
+        if (songs.isEmpty()) return
+
+        val currentId = state.currentAudioTrack?.id
+        val currentIndex = songs.indexOfFirst { it.id == currentId }
+
+        val nextIndex = if (state.isShuffleEnabled && songs.size > 1) {
+            var rand = (songs.indices).random()
+            while (rand == currentIndex) {
+                rand = (songs.indices).random()
+            }
+            rand
+        } else {
+            if (currentIndex >= 0) (currentIndex + 1) % songs.size else 0
+        }
+
+        val nextSong = songs[nextIndex]
+        val audioTrack = AudioTrack(
+            id = nextSong.id,
+            title = nextSong.title,
+            artist = nextSong.artist,
+            duration = nextSong.durationSeconds,
+            url = nextSong.audioUrl,
+            uploaderId = nextSong.uploaderId,
+            cover = nextSong.cover,
+            type = "music",
+            isVerified = nextSong.isVerified,
+            likesCount = nextSong.stats.likes
+        )
+        playTrack(audioTrack)
+    }
+
+    fun prevTrack() {
+        val state = _uiState.value
+        if (state.audioPositionSeconds > 3) {
+            _uiState.update { it.copy(audioPositionSeconds = 0) }
+            return
+        }
+
+        val songs = state.songs
+        if (songs.isEmpty()) return
+
+        val currentId = state.currentAudioTrack?.id
+        val currentIndex = songs.indexOfFirst { it.id == currentId }
+        val prevIndex = if (currentIndex > 0) currentIndex - 1 else songs.size - 1
+
+        val prevSong = songs[prevIndex]
+        val audioTrack = AudioTrack(
+            id = prevSong.id,
+            title = prevSong.title,
+            artist = prevSong.artist,
+            duration = prevSong.durationSeconds,
+            url = prevSong.audioUrl,
+            uploaderId = prevSong.uploaderId,
+            cover = prevSong.cover,
+            type = "music",
+            isVerified = prevSong.isVerified,
+            likesCount = prevSong.stats.likes
+        )
+        playTrack(audioTrack)
+    }
+
+    fun stopAudio() {
+        playbackJob?.cancel()
+        _uiState.update { it.copy(isPlayingAudio = false, audioPositionSeconds = 0) }
+    }
+
+    fun closeAudioPlayer() {
+        playbackJob?.cancel()
+        _uiState.update {
+            it.copy(
+                currentAudioTrack = null,
+                isPlayingAudio = false,
+                audioPositionSeconds = 0,
+                isPlayerExpanded = false
+            )
+        }
+    }
+
+    fun setPlayerExpanded(expanded: Boolean) {
+        _uiState.update { it.copy(isPlayerExpanded = expanded) }
+    }
+
+    fun toggleShuffle() {
+        _uiState.update { it.copy(isShuffleEnabled = !it.isShuffleEnabled) }
+    }
+
+    fun toggleRepeat() {
+        _uiState.update { it.copy(isRepeatEnabled = !it.isRepeatEnabled) }
+    }
+
+    fun setAudioVolume(vol: Float) {
+        _uiState.update { it.copy(audioVolume = vol.coerceIn(0f, 1f)) }
+    }
+
+    fun toggleLikeTrack(trackId: String, type: String = "music") {
+        _uiState.update { state ->
+            val key = "$type:$trackId"
+            val isLiked = key in state.likedTrackKeys
+            val updatedKeys = if (isLiked) state.likedTrackKeys - key else state.likedTrackKeys + key
+
+            val updatedSongs = state.songs.map { s ->
+                if (s.id == trackId) {
+                    val newLikes = if (isLiked) maxOf(0L, s.stats.likes - 1) else s.stats.likes + 1
+                    s.copy(stats = s.stats.copy(likes = newLikes))
+                } else s
+            }
+
+            val updatedTrack = state.currentAudioTrack?.let { curr ->
+                if (curr.id == trackId) {
+                    curr.copy(likesCount = if (isLiked) maxOf(0L, curr.likesCount - 1) else curr.likesCount + 1)
+                } else curr
+            }
+
+            state.copy(
+                likedTrackKeys = updatedKeys,
+                songs = updatedSongs,
+                currentAudioTrack = updatedTrack
+            )
+        }
+    }
+
+    fun downloadTrack(trackId: String) {
+        val state = _uiState.value
+        val trackTitle = state.songs.find { it.id == trackId }?.title
+            ?: state.currentAudioTrack?.takeIf { it.id == trackId }?.title
+            ?: "Track"
+
+        downloadJob?.cancel()
+        downloadJob = viewModelScope.launch {
+            _uiState.update { it.copy(downloadingTrackId = trackId, downloadProgress = 15, downloadToast = "Starting download...") }
+            delay(400)
+            _uiState.update { it.copy(downloadProgress = 45) }
+            delay(400)
+            _uiState.update { it.copy(downloadProgress = 85) }
+            delay(350)
+            _uiState.update { it.copy(downloadProgress = 100) }
+            delay(300)
+            _uiState.update {
+                it.copy(
+                    downloadingTrackId = null,
+                    downloadProgress = 0,
+                    downloadedTrackIds = it.downloadedTrackIds + trackId,
+                    downloadToast = "Downloaded \"$trackTitle\""
+                )
+            }
+            delay(3000)
+            _uiState.update { it.copy(downloadToast = null) }
+        }
+    }
+
+    fun dismissDownloadToast() {
+        _uiState.update { it.copy(downloadToast = null) }
+    }
+
+    fun openSongDiscussions(track: AudioTrack) {
+        _uiState.update { it.copy(activeDiscussionTrack = track) }
+    }
+
+    fun closeSongDiscussions() {
+        _uiState.update { it.copy(activeDiscussionTrack = null) }
+    }
+
+    fun addSongComment(songId: String, text: String) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        if (text.isBlank()) return
+        val currentUser = _uiState.value.currentUser
+        val newComment = SongComment(
+            id = System.currentTimeMillis(),
+            songId = songId,
+            userId = currentUser.id,
+            userName = currentUser.name,
+            userAvatar = currentUser.profileImageUrl,
+            text = text.trim(),
+            createdAt = System.currentTimeMillis()
+        )
+        _uiState.update { state ->
+            val existing = state.songComments[songId] ?: emptyList()
+            state.copy(
+                songComments = state.songComments + (songId to (listOf(newComment) + existing))
+            )
+        }
+    }
+
+    fun toggleHideSongComment(songId: String, commentId: Long) {
+        _uiState.update { state ->
+            val list = state.songComments[songId] ?: emptyList()
+            val updated = list.map { c ->
+                if (c.id == commentId) c.copy(isHidden = !c.isHidden) else c
+            }
+            state.copy(songComments = state.songComments + (songId to updated))
+        }
+    }
+
+    fun deleteSongComment(songId: String, commentId: Long) {
+        _uiState.update { state ->
+            val list = state.songComments[songId] ?: emptyList()
+            state.copy(songComments = state.songComments + (songId to list.filter { it.id != commentId }))
+        }
+    }
+
+    fun openShareTrack(track: AudioTrack) {
+        _uiState.update { it.copy(activeShareTrack = track) }
+    }
+
+    fun closeShareTrack() {
+        _uiState.update { it.copy(activeShareTrack = null) }
+    }
+
+    fun uploadSong(
+        title: String,
+        artist: String,
+        genre: String,
+        album: String,
+        coverUrl: String,
+        audioUrl: String,
+        duration: String = "3:15"
+    ) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        viewModelScope.launch {
+            _uiState.update { it.copy(songUploadProgress = 20, songUploadStatus = "Uploading audio...") }
+            delay(400)
+            _uiState.update { it.copy(songUploadProgress = 60, songUploadStatus = "Compressing artwork...") }
+            delay(400)
+            _uiState.update { it.copy(songUploadProgress = 90, songUploadStatus = "Publishing to catalog...") }
+            delay(400)
+
+            val newSong = Song(
+                id = "song_${System.currentTimeMillis()}",
+                title = title.ifBlank { "Untitled Track" },
+                artist = artist.ifBlank { _uiState.value.currentUser.name },
+                cover = coverUrl.ifBlank { "https://media.unera.social/task_01kftb3024ed7bm84gy6j485fh_1769336848_img_0.webp" },
+                audioUrl = audioUrl.ifBlank { "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" },
+                duration = duration,
+                durationSeconds = 195,
+                uploaderId = _uiState.value.currentUser.id,
+                uploadDate = "Just now",
+                genre = genre.ifBlank { "Afrobeats" },
+                album = album.ifBlank { "Single" },
+                isVerified = _uiState.value.currentUser.isVerified,
+                stats = SongStats(plays = 1L, likes = 0L)
+            )
+
+            _uiState.update { state ->
+                state.copy(
+                    songs = listOf(newSong) + state.songs,
+                    songUploadProgress = 100,
+                    songUploadStatus = "Track published!"
+                )
+            }
+            delay(1200)
+            _uiState.update { it.copy(songUploadProgress = null, songUploadStatus = null) }
+        }
+    }
+
+    fun deleteUploadedSong(songId: String) {
+        _uiState.update { state ->
+            val updated = state.songs.filter { it.id != songId }
+            state.copy(
+                songs = updated,
+                currentAudioTrack = if (state.currentAudioTrack?.id == songId) null else state.currentAudioTrack
+            )
+        }
+    }
+
+    // ==========================================
+    // GROUPS & COMMUNITY METHODS
+    // ==========================================
+
+    // ==========================================
+    // GROUPS & COMMUNITY METHODS (LIVE API)
+    // ==========================================
+
+    fun refreshGroups() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isGroupsLoading = true) }
+            val viewerId = _uiState.value.currentUser.id
+            val liveGroups = GroupsApiService.fetchGroups(viewerId)
+            val suggestions = GroupsApiService.fetchGroupSuggestions(viewerId)
+            val invites = GroupsApiService.fetchGroupInvites(viewerId)
+            _uiState.update { state ->
+                state.copy(
+                    groups = liveGroups,
+                    groupSuggestions = suggestions,
+                    groupInvites = invites,
+                    isGroupsLoading = false
+                )
+            }
+            val currentActiveId = _uiState.value.activeGroupId
+            if (currentActiveId != null) {
+                loadGroupData(currentActiveId)
+            }
+        }
+    }
+
+    fun loadGroupData(groupId: Long) {
+        val viewerId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            // 1. Group Details & member IDs
+            val (updatedGroup, memberIds) = GroupsApiService.fetchGroupDetails(groupId, viewerId)
+            if (updatedGroup != null) {
+                val fullGroup = if (memberIds.isNotEmpty()) updatedGroup.copy(members = memberIds) else updatedGroup
+                _uiState.update { state ->
+                    val existing = state.groups.map { if (it.id == groupId) fullGroup else it }
+                    val finalGroups = if (existing.none { it.id == groupId }) listOf(fullGroup) + existing else existing
+                    state.copy(groups = finalGroups)
+                }
+            }
+            // 2. Posts
+            _uiState.update { it.copy(isGroupPostsLoading = true) }
+            val posts = GroupsApiService.fetchGroupPosts(groupId, viewerId)
+            _uiState.update { state ->
+                val otherPosts = state.groupPosts.filter { it.groupId != groupId }
+                state.copy(groupPosts = posts + otherPosts, isGroupPostsLoading = false)
+            }
+            // 3. Members
+            val members = GroupsApiService.fetchGroupMembers(groupId)
+            _uiState.update { state ->
+                state.copy(groupMembers = state.groupMembers + (groupId to members))
+            }
+            // 4. Events
+            val events = GroupsApiService.fetchGroupEvents(groupId, viewerId)
+            _uiState.update { state ->
+                state.copy(groupEvents = state.groupEvents + (groupId to events))
+            }
+        }
+    }
+
+    fun setActiveGroupId(groupId: Long?) {
+        _uiState.update { it.copy(activeGroupId = groupId) }
+        if (groupId != null) {
+            loadGroupData(groupId)
+        }
+    }
+
+    fun createGroup(
+        name: String,
+        description: String,
+        type: String, // "public" or "private"
+        category: String, // "general", "recruitment", "buy_sell"
+        profileImage: String,
+        coverImage: String
+    ) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        viewModelScope.launch {
+            val created = GroupsApiService.createGroup(
+                name = name.ifBlank { "New Community" },
+                description = description,
+                type = type,
+                category = category,
+                profileImage = profileImage,
+                coverImage = coverImage,
+                adminId = _uiState.value.currentUser.id
+            )
+            if (created != null) {
+                _uiState.update { state ->
+                    state.copy(
+                        groups = listOf(created) + state.groups,
+                        activeGroupId = created.id
+                    )
+                }
+                loadGroupData(created.id)
+            } else {
+                val newId = System.currentTimeMillis()
+                val fallbackGroup = Group(
+                    id = newId,
+                    adminId = _uiState.value.currentUser.id,
+                    name = name.ifBlank { "New Community" },
+                    description = description,
+                    isPrivate = type == "private",
+                    category = category,
+                    coverImageUrl = coverImage.ifBlank { "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&w=1500&q=80" },
+                    profileImageUrl = profileImage.ifBlank { "https://ui-avatars.com/api/?name=${name}&background=random" },
+                    membersCount = 1,
+                    isMember = true,
+                    memberPostingAllowed = true,
+                    members = listOf(_uiState.value.currentUser.id)
+                )
+                _uiState.update { state ->
+                    state.copy(
+                        groups = listOf(fallbackGroup) + state.groups,
+                        activeGroupId = newId
+                    )
+                }
+            }
+        }
+    }
+
+    fun joinGroup(groupId: Long) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val currentUserId = _uiState.value.currentUser.id
+        _uiState.update { state ->
+            val updatedGroups = state.groups.map { group ->
+                if (group.id == groupId) {
+                    val newMembers = if (group.members.contains(currentUserId)) group.members else group.members + currentUserId
+                    group.copy(
+                        isMember = true,
+                        members = newMembers,
+                        membersCount = newMembers.size.coerceAtLeast(group.membersCount + 1)
+                    )
+                } else group
+            }
+            state.copy(groups = updatedGroups)
+        }
+        viewModelScope.launch {
+            GroupsApiService.joinGroup(groupId, currentUserId)
+            loadGroupData(groupId)
+        }
+    }
+
+    fun leaveGroup(groupId: Long) {
+        val currentUserId = _uiState.value.currentUser.id
+        _uiState.update { state ->
+            val updatedGroups = state.groups.map { group ->
+                if (group.id == groupId) {
+                    val newMembers = group.members.filter { it != currentUserId }
+                    group.copy(
+                        isMember = false,
+                        members = newMembers,
+                        membersCount = (group.membersCount - 1).coerceAtLeast(0)
+                    )
+                } else group
+            }
+            state.copy(groups = updatedGroups)
+        }
+        viewModelScope.launch {
+            GroupsApiService.leaveOrRemoveMember(groupId, currentUserId, currentUserId)
+            loadGroupData(groupId)
+        }
+    }
+
+    fun deleteGroup(groupId: Long) {
+        _uiState.update { state ->
+            state.copy(
+                groups = state.groups.filter { it.id != groupId },
+                groupPosts = state.groupPosts.filter { it.groupId != groupId },
+                activeGroupId = if (state.activeGroupId == groupId) null else state.activeGroupId
+            )
+        }
+        viewModelScope.launch {
+            GroupsApiService.deleteGroup(groupId)
+        }
+    }
+
+    fun updateGroupSettings(groupId: Long, name: String, description: String, memberPostingAllowed: Boolean) {
+        _uiState.update { state ->
+            val updated = state.groups.map { g ->
+                if (g.id == groupId) {
+                    g.copy(
+                        name = name.ifBlank { g.name },
+                        description = description,
+                        memberPostingAllowed = memberPostingAllowed
+                    )
+                } else g
+            }
+            state.copy(groups = updated)
+        }
+        viewModelScope.launch {
+            GroupsApiService.updateGroup(
+                groupId = groupId,
+                name = name,
+                description = description,
+                memberPostingAllowed = memberPostingAllowed
+            )
+        }
+    }
+
+    fun updateGroupImage(groupId: Long, isCover: Boolean, imageUrl: String) {
+        _uiState.update { state ->
+            val updated = state.groups.map { g ->
+                if (g.id == groupId) {
+                    if (isCover) g.copy(coverImageUrl = imageUrl) else g.copy(profileImageUrl = imageUrl)
+                } else g
+            }
+            state.copy(groups = updated)
+        }
+        viewModelScope.launch {
+            GroupsApiService.updateGroup(
+                groupId = groupId,
+                coverImage = if (isCover) imageUrl else null,
+                profileImage = if (!isCover) imageUrl else null
+            )
+        }
+    }
+
+    fun postToGroup(
+        context: Context?,
+        groupId: Long,
+        content: String,
+        imageUrls: List<String> = emptyList(),
+        price: Double? = null,
+        currency: String = "USD",
+        condition: String? = null,
+        location: String? = null,
+        status: String = "available",
+        jobTitle: String? = null,
+        company: String? = null,
+        jobType: String? = null,
+        salary: String? = null,
+        applicationType: String? = null,
+        applicationValue: String? = null
+    ) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+
+        val meId = _uiState.value.currentUser.id
+        val targetGroup = _uiState.value.groups.find { it.id == groupId }
+        val groupName = targetGroup?.name?.let { "\"$it\"" } ?: "group"
+        val previewUrl = imageUrls.firstOrNull()
+
+        // 1. Initial State: 15% - "Posting to <groupName>…"
+        _uiState.update { state ->
+            state.copy(
+                postUploadState = PostUploadState(
+                    isUploading = true,
+                    progress = 15f,
+                    title = "Posting to $groupName…",
+                    secondaryStatus = if (imageUrls.isNotEmpty()) {
+                        if (imageUrls.size > 1) "Optimizing ${imageUrls.size} photos..." else "Preparing media attachment..."
+                    } else {
+                        "Publishing post to group..."
+                    },
+                    previewUrl = previewUrl,
+                    isSuccess = false
+                )
+            )
+        }
+
+        viewModelScope.launch {
+            try {
+                val finalMediaUrls = mutableListOf<String>()
+                val finalMediaTypes = mutableListOf<String>()
+                val finalMediaMeta = mutableListOf<Map<String, String>>()
+
+                if (imageUrls.isNotEmpty()) {
+                    var completedFiles = 0
+                    for (item in imageUrls) {
+                        if (item.contains("video", ignoreCase = true) || item.endsWith(".mp4", ignoreCase = true) || item.endsWith(".mov", ignoreCase = true)) {
+                            throw IllegalStateException("Video uploads are disabled in groups. Only photos can be posted.")
+                        }
+
+                        val targetContext = context ?: getApplication<Application>().applicationContext
+                        if (item.startsWith("content://") || item.startsWith("file://")) {
+                            val uri = Uri.parse(item)
+                            val bundleResult = MediaUploadHelper.buildImageBundleAndUpload(targetContext, uri)
+                            if (bundleResult == null || bundleResult.feedUrl.isBlank()) {
+                                throw IllegalStateException("Failed to upload photo to group")
+                            }
+                            val feed = bundleResult.feedUrl
+                            val thumb = bundleResult.thumbUrl.ifBlank { feed }
+                            finalMediaUrls.add(feed)
+                            finalMediaTypes.add("image")
+                            finalMediaMeta.add(
+                                mapOf(
+                                    "thumb" to thumb,
+                                    "feed" to feed,
+                                    "full" to feed, // group only compress to feed image
+                                    "type" to "image"
+                                )
+                            )
+                        } else if (item.startsWith("http://") || item.startsWith("https://")) {
+                            finalMediaUrls.add(item)
+                            finalMediaTypes.add("image")
+                            finalMediaMeta.add(
+                                mapOf(
+                                    "thumb" to item,
+                                    "feed" to item,
+                                    "full" to item,
+                                    "type" to "image"
+                                )
+                            )
+                        }
+
+                        completedFiles++
+                        val pct = Math.min(85f, 20f + ((completedFiles.toFloat() / imageUrls.size) * 65f))
+                        _uiState.update { state ->
+                            state.copy(
+                                postUploadState = state.postUploadState?.copy(
+                                    progress = pct,
+                                    secondaryStatus = if (imageUrls.size > 1) {
+                                        "Uploaded photo $completedFiles of ${imageUrls.size}..."
+                                    } else {
+                                        "Photo uploaded. Publishing post..."
+                                    }
+                                )
+                            )
+                        }
+                    }
+                }
+
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            progress = 90f,
+                            secondaryStatus = "Publishing post to group..."
+                        )
+                    )
+                }
+
+                val createdPost = GroupsApiService.createGroupPost(
+                    groupId = groupId,
+                    userId = meId,
+                    content = content,
+                    mediaUrls = finalMediaUrls,
+                    mediaTypes = finalMediaTypes,
+                    mediaMeta = finalMediaMeta,
+                    price = price,
+                    currency = currency,
+                    condition = condition,
+                    location = location,
+                    status = status,
+                    jobTitle = jobTitle,
+                    company = company,
+                    jobType = jobType,
+                    salary = salary,
+                    applicationType = applicationType,
+                    applicationValue = applicationValue
+                )
+
+                if (createdPost != null) {
+                    _uiState.update { state ->
+                        state.copy(
+                            groupPosts = listOf(createdPost) + state.groupPosts,
+                            postUploadState = state.postUploadState?.copy(
+                                isUploading = false,
+                                isSuccess = true,
+                                progress = 100f,
+                                title = "Group post published!",
+                                secondaryStatus = "Your post is now visible in the group."
+                            )
+                        )
+                    }
+                } else {
+                    val newPost = GroupPost(
+                        id = System.currentTimeMillis(),
+                        groupId = groupId,
+                        author = _uiState.value.currentUser,
+                        content = content,
+                        imageUrls = finalMediaUrls,
+                        createdAt = "Just now",
+                        likesCount = 0,
+                        commentsCount = 0,
+                        sharesCount = 0,
+                        isLiked = false,
+                        price = price,
+                        currency = currency,
+                        condition = condition,
+                        location = location,
+                        status = status,
+                        jobTitle = jobTitle,
+                        company = company,
+                        jobType = jobType,
+                        salary = salary,
+                        applicationType = applicationType,
+                        applicationValue = applicationValue
+                    )
+                    _uiState.update { state ->
+                        state.copy(
+                            groupPosts = listOf(newPost) + state.groupPosts,
+                            postUploadState = state.postUploadState?.copy(
+                                isUploading = false,
+                                isSuccess = true,
+                                progress = 100f,
+                                title = "Group post published!",
+                                secondaryStatus = "Your post is now visible in the group."
+                            )
+                        )
+                    }
+                }
+
+                delay(2800)
+                _uiState.update { it.copy(postUploadState = null) }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                val errorMsg = e.message ?: "Could not publish group post."
+                _uiState.update { state ->
+                    state.copy(
+                        postUploadState = state.postUploadState?.copy(
+                            isUploading = false,
+                            isSuccess = false,
+                            progress = 0f,
+                            title = "Upload failed",
+                            secondaryStatus = errorMsg
+                        )
+                    )
+                }
+                delay(4000)
+                _uiState.update { it.copy(postUploadState = null) }
+            }
+        }
+    }
+
+    fun postToGroup(
+        groupId: Long,
+        content: String,
+        imageUrls: List<String> = emptyList(),
+        price: Double? = null,
+        currency: String = "USD",
+        condition: String? = null,
+        location: String? = null,
+        status: String = "available",
+        jobTitle: String? = null,
+        company: String? = null,
+        jobType: String? = null,
+        salary: String? = null,
+        applicationType: String? = null,
+        applicationValue: String? = null
+    ) {
+        postToGroup(
+            context = getApplication<Application>().applicationContext,
+            groupId = groupId,
+            content = content,
+            imageUrls = imageUrls,
+            price = price,
+            currency = currency,
+            condition = condition,
+            location = location,
+            status = status,
+            jobTitle = jobTitle,
+            company = company,
+            jobType = jobType,
+            salary = salary,
+            applicationType = applicationType,
+            applicationValue = applicationValue
+        )
+    }
+
+    fun toggleLikeGroupPost(postId: Long, reaction: String = "like") {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        val currentUserId = _uiState.value.currentUser.id
+        _uiState.update { state ->
+            val updated = state.groupPosts.map { post ->
+                if (post.id == postId) {
+                    val wasLiked = post.isLiked
+                    val newCount = if (wasLiked) (post.likesCount - 1).coerceAtLeast(0) else post.likesCount + 1
+                    post.copy(
+                        isLiked = !wasLiked,
+                        likesCount = newCount,
+                        myReaction = if (wasLiked) null else reaction
+                    )
+                } else post
+            }
+            state.copy(groupPosts = updated)
+        }
+        viewModelScope.launch {
+            GroupsApiService.likeGroupPost(postId, currentUserId, reaction)
+        }
+    }
+
+    fun addGroupPostComment(postId: Long, text: String) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        if (text.isBlank()) return
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            val createdComment = GroupsApiService.addGroupPostComment(postId, currentUserId, text)
+            val newComment = createdComment ?: Comment(
+                id = System.currentTimeMillis(),
+                author = _uiState.value.currentUser,
+                text = text,
+                timestamp = "Just now",
+                likesCount = 0,
+                isLiked = false
+            )
+            _uiState.update { state ->
+                val updated = state.groupPosts.map { post ->
+                    if (post.id == postId) {
+                        post.copy(
+                            comments = post.comments + newComment,
+                            commentsCount = post.commentsCount + 1
+                        )
+                    } else post
+                }
+                state.copy(groupPosts = updated)
+            }
+        }
+    }
+
+    fun deleteGroupPost(postId: Long) {
+        val currentUserId = _uiState.value.currentUser.id
+        _uiState.update { state ->
+            state.copy(groupPosts = state.groupPosts.filter { it.id != postId })
+        }
+        viewModelScope.launch {
+            GroupsApiService.deleteGroupPost(postId, currentUserId)
+        }
+    }
+
+    fun shareGroupPost(postId: Long) {
+        if (_uiState.value.isGuest || !_uiState.value.isLoggedIn) {
+            openAuth("login")
+            return
+        }
+        _uiState.update { state ->
+            val updated = state.groupPosts.map { post ->
+                if (post.id == postId) post.copy(sharesCount = post.sharesCount + 1) else post
+            }
+            state.copy(groupPosts = updated)
+        }
+    }
+
+    fun inviteUserToGroup(groupId: Long, userId: Long) {
+        val currentUserId = _uiState.value.currentUser.id
+        viewModelScope.launch {
+            GroupsApiService.sendGroupInvite(groupId, currentUserId, listOf(userId))
+        }
+    }
+
+    fun acceptGroupInvite(inviteId: Long, groupId: Long) {
+        val currentUserId = _uiState.value.currentUser.id
+        joinGroup(groupId)
+        _uiState.update { state ->
+            state.copy(groupInvites = state.groupInvites.filter { it.id != inviteId })
+        }
+        viewModelScope.launch {
+            GroupsApiService.respondGroupInvite(inviteId, groupId, currentUserId, "accepted")
+        }
+    }
+
+    fun declineGroupInvite(inviteId: Long) {
+        val currentUserId = _uiState.value.currentUser.id
+        _uiState.update { state ->
+            state.copy(groupInvites = state.groupInvites.filter { it.id != inviteId })
+        }
+        viewModelScope.launch {
+            GroupsApiService.respondGroupInvite(inviteId, 0L, currentUserId, "declined")
+        }
+    }
+
+    fun toggleMemberPosting(groupId: Long, userId: Long, disabled: Boolean) {
+        val currentUserId = _uiState.value.currentUser.id
+        _uiState.update { state ->
+            val currentGroupDisabled = state.groupPostingDisabledOverrides[groupId] ?: emptySet()
+            val newGroupDisabled = if (disabled) currentGroupDisabled + userId else currentGroupDisabled - userId
+            state.copy(
+                groupPostingDisabledOverrides = state.groupPostingDisabledOverrides + (groupId to newGroupDisabled)
+            )
+        }
+        viewModelScope.launch {
+            val payload = JSONObject().apply {
+                put("group_id", groupId)
+                put("user_id", userId)
+                put("disabled", disabled)
+                put("actor_id", currentUserId)
+            }
+            GroupsApiService.patchMemberAction("toggle-posting", payload)
+            val members = GroupsApiService.fetchGroupMembers(groupId)
+            _uiState.update { it.copy(groupMembers = it.groupMembers + (groupId to members)) }
+        }
+    }
+
+    fun setMemberRole(groupId: Long, userId: Long, role: String) {
+        val currentUserId = _uiState.value.currentUser.id
+        _uiState.update { state ->
+            val currentGroupRoles = state.groupMembersOverrides[groupId] ?: emptyMap()
+            state.copy(
+                groupMembersOverrides = state.groupMembersOverrides + (groupId to (currentGroupRoles + (userId to role)))
+            )
+        }
+        viewModelScope.launch {
+            val action = when (role) {
+                "admin" -> "make-admin"
+                "moderator" -> "make-moderator"
+                else -> "remove-admin"
+            }
+            val payload = JSONObject().apply {
+                put("group_id", groupId)
+                put("user_id", userId)
+                put("actor_id", currentUserId)
+            }
+            GroupsApiService.patchMemberAction(action, payload)
+            val members = GroupsApiService.fetchGroupMembers(groupId)
+            _uiState.update { it.copy(groupMembers = it.groupMembers + (groupId to members)) }
+        }
+    }
+
+    fun removeGroupMember(groupId: Long, userId: Long) {
+        val currentUserId = _uiState.value.currentUser.id
+        _uiState.update { state ->
+            val updatedGroups = state.groups.map { group ->
+                if (group.id == groupId) {
+                    val newMembers = group.members.filter { it != userId }
+                    group.copy(
+                        members = newMembers,
+                        membersCount = (group.membersCount - 1).coerceAtLeast(0)
+                    )
+                } else group
+            }
+            state.copy(groups = updatedGroups)
+        }
+        viewModelScope.launch {
+            GroupsApiService.leaveOrRemoveMember(groupId, userId, currentUserId)
+            val members = GroupsApiService.fetchGroupMembers(groupId)
+            _uiState.update { it.copy(groupMembers = it.groupMembers + (groupId to members)) }
+        }
+    }
+
+    // ==========================================
+    // ADS MANAGER ACTIONS
+    // ==========================================
+
+    fun pauseAdCampaign(id: Long) {
+        _uiState.update { state ->
+            val updated = state.adCampaigns.map {
+                if (it.id == id) it.copy(status = "paused") else it
+            }
+            state.copy(adCampaigns = updated)
+        }
+    }
+
+    fun resumeAdCampaign(id: Long) {
+        _uiState.update { state ->
+            val updated = state.adCampaigns.map {
+                if (it.id == id) it.copy(status = "active") else it
+            }
+            state.copy(adCampaigns = updated)
+        }
+    }
+
+    fun deleteAdCampaign(id: Long) {
+        _uiState.update { state ->
+            val updated = state.adCampaigns.filter { it.id != id }
+            state.copy(adCampaigns = updated)
+        }
+    }
+
+    fun createAdCampaign(
+        postId: Long?,
+        name: String,
+        type: String,
+        mediaUrl: String?,
+        mediaUrls: List<String>,
+        description: String,
+        link: String?,
+        phone: String?,
+        email: String?,
+        cta: String,
+        location: String,
+        budget: Int,
+        days: Int
+    ) {
+        val newCampaign = AdCampaign(
+            id = System.currentTimeMillis(),
+            name = name.ifBlank { "Campaign #${System.currentTimeMillis() % 1000}" },
+            type = type,
+            status = "active",
+            mediaUrl = mediaUrl,
+            mediaUrls = mediaUrls,
+            description = description,
+            cta = cta,
+            link = link,
+            phone = phone,
+            email = email,
+            location = location.ifBlank { "Global" },
+            budget = budget,
+            days = days,
+            startDate = "2026-03-11",
+            endDate = "2026-03-${11 + days}",
+            impressions = 0,
+            views = 0,
+            clicks = 0,
+            postId = postId
+        )
+        _uiState.update { state ->
+            state.copy(
+                adCampaigns = listOf(newCampaign) + state.adCampaigns,
+                activeAdCampaignToBoostPost = null
+            )
+        }
+    }
+
+    fun setAdCampaignToBoostPost(post: Post?) {
+        _uiState.update { it.copy(activeAdCampaignToBoostPost = post) }
+    }
+
+    // ==========================================
+    // AUTHENTICATION ACTIONS
+    // ==========================================
+
+    fun openAuth(mode: String = "login") {
+        _uiState.update { it.copy(showAuthModal = true, authMode = mode) }
+    }
+
+    fun closeAuth() {
+        _uiState.update { it.copy(showAuthModal = false) }
+    }
+
+    fun setAuthMode(mode: String) {
+        _uiState.update { it.copy(authMode = mode) }
+    }
+
+    fun continueAsGuest() {
+        _uiState.update {
+            it.copy(
+                currentUser = MockData.currentUser,
+                isGuest = true,
+                isLoggedIn = false,
+                showAuthModal = false,
+                currentScreen = Screen.FEED
+            )
+        }
+        refreshFeed()
+    }
+
+    suspend fun loginUser(email: String, pass: String): Pair<Boolean, String?> {
+        val trimmedEmail = email.trim()
+        if (trimmedEmail.isBlank() || pass.isBlank()) {
+            return Pair(false, "Please enter both email and password.")
+        }
+
+        val result = UserApiService.loginUser(trimmedEmail, pass)
+        return if (result.isSuccess) {
+            val authResult = result.getOrThrow()
+            val liveUser = authResult.user
+            val context = getApplication<Application>().applicationContext
+            UserSessionManager.saveAuth(context, authResult.token, liveUser)
+
+            _uiState.update { state ->
+                val updatedUsers = if (state.users.any { it.id == liveUser.id }) {
+                    state.users.map { if (it.id == liveUser.id) liveUser else it }
+                } else {
+                    listOf(liveUser) + state.users
+                }
+                state.copy(
+                    currentUser = liveUser,
+                    users = updatedUsers,
+                    isLoggedIn = true,
+                    isGuest = false,
+                    showAuthModal = false,
+                    currentScreen = Screen.FEED
+                )
+            }
+            // Fetch live home feed for logged in user from /api/feeds?userId=<id>&limit=50
+            refreshFeed()
+            refreshVideos()
+            fetchPeopleYouMayKnow()
+            Pair(true, null)
+        } else {
+            val errorMsg = result.exceptionOrNull()?.message ?: "Invalid email or password."
+            Pair(false, errorMsg)
+        }
+    }
+
+    suspend fun registerUser(
+        username: String,
+        email: String,
+        pass: String,
+        nationality: String,
+        location: String,
+        birthDate: String,
+        gender: String
+    ): Pair<Boolean, String?> {
+        val trimmedEmail = email.trim()
+        if (username.isBlank() || trimmedEmail.isBlank() || pass.length < 6) {
+            return Pair(false, "Please complete all fields with a valid password (min 6 characters).")
+        }
+
+        val result = UserApiService.signupUser(
+            username = username.trim(),
+            email = trimmedEmail,
+            pass = pass,
+            nationality = nationality.ifBlank { "Tanzania" },
+            location = location.ifBlank { "Dar es Salaam" },
+            birthDate = birthDate,
+            gender = gender.ifBlank { "Female" }
+        )
+
+        return if (result.isSuccess) {
+            val authResult = result.getOrThrow()
+            val liveUser = authResult.user
+            val context = getApplication<Application>().applicationContext
+            UserSessionManager.saveAuth(context, authResult.token, liveUser)
+
+            _uiState.update { state ->
+                val updatedUsers = if (state.users.any { it.id == liveUser.id }) {
+                    state.users.map { if (it.id == liveUser.id) liveUser else it }
+                } else {
+                    listOf(liveUser) + state.users
+                }
+                state.copy(
+                    currentUser = liveUser,
+                    users = updatedUsers,
+                    isLoggedIn = true,
+                    isGuest = false,
+                    showAuthModal = false,
+                    currentScreen = Screen.FEED
+                )
+            }
+            refreshFeed()
+            refreshVideos()
+            fetchPeopleYouMayKnow()
+            Pair(true, null)
+        } else {
+            val errorMsg = result.exceptionOrNull()?.message ?: "Signup failed. Please try again."
+            Pair(false, errorMsg)
+        }
+    }
+
+    fun logoutUser() {
+        val context = getApplication<Application>().applicationContext
+        UserSessionManager.clearUser(context)
+        _uiState.update { state ->
+            state.copy(
+                currentUser = MockData.currentUser, // Reset to Guest user (id = 0L)
+                isLoggedIn = false,
+                isGuest = true,
+                showAuthModal = true,
+                authMode = "login"
+            )
+        }
+        refreshFeed()
+    }
+}
