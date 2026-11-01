@@ -138,6 +138,7 @@ data class Comment(
     val timestamp: String,
     val likesCount: Int = 0,
     val isLiked: Boolean = false,
+    val myReaction: String? = null,
     val imageUrl: String? = null,
     val parentCommentId: Long? = null,
     val replies: List<Comment> = emptyList()
@@ -155,6 +156,18 @@ data class MediaMetaItem(
     val width: Int? = null,
     val height: Int? = null,
     val duration: Double? = null
+)
+
+data class SponsoredMeta(
+    val adId: Long = 0L,
+    val advertiserId: Long = 0L,
+    val campaignName: String = "Sponsored Product",
+    val headline: String = "",
+    val ctaText: String = "Shop Now",
+    val ctaUrl: String = "",
+    val contactType: String = "link", // "link", "phone", "email"
+    val phoneNumber: String = "",
+    val emailAddress: String = ""
 )
 
 data class Post(
@@ -200,7 +213,8 @@ data class Post(
     val mediaMeta: List<MediaMetaItem> = emptyList(),
     val createdAt: String? = null,
     val userId: Long = author.id,
-    val taggedUsers: List<Long> = emptyList()
+    val taggedUsers: List<Long> = emptyList(),
+    val sponsoredMeta: SponsoredMeta? = null
 ) {
     /**
      * Priority:

@@ -144,6 +144,10 @@ fun FeedScreen(
     currentUser: User,
     stories: List<Story>,
     posts: List<Post>,
+    ads: List<SponsoredFeedAd> = emptyList(),
+    products: List<Product> = emptyList(),
+    adCampaigns: List<AdCampaign> = emptyList(),
+    onViewProduct: ((Long) -> Unit)? = null,
     isGuest: Boolean = false,
     onRequestAuth: () -> Unit = {},
     onOpenCreatePost: () -> Unit,
@@ -286,7 +290,35 @@ fun FeedScreen(
                     (post.mediaMeta.firstOrNull()?.type == "video" && PostsApiService.isValidVideoUrl(post.mediaMeta.firstOrNull()?.resolution720 ?: post.mediaMeta.firstOrNull()?.original))
                 )
 
-                if (post.isSponsored || post.postType == "sponsored") {
+                val isSponsoredPost = post.isSponsored || post.postType == "sponsored" || post.postType == "ad"
+                val isSponsoredProduct = (isSponsoredPost && (post.product != null || post.postType == "product")) || (post.product != null && post.product.isSponsored)
+
+                if (isSponsoredProduct) {
+                    SponsoredProductCard(
+                        product = post.product,
+                        ad = post,
+                        currentUser = currentUser,
+                        users = allUsers,
+                        onProfileClick = { onUserClick(post.author) },
+                        onViewProduct = { prodId ->
+                            val targetProd = post.product ?: products.find { it.id == prodId }
+                            if (targetProd != null) onOpenProduct?.invoke(targetProd)
+                            else onViewProduct?.invoke(prodId)
+                        },
+                        onReact = { _, reaction ->
+                            if (isGuest) onRequestAuth()
+                            else onReactPost?.invoke(post.id, reaction) ?: onLikePost(post.id)
+                        },
+                        onOpenComments = {
+                            if (isGuest) onRequestAuth() else discussionsSheetPost = post
+                        },
+                        onShare = {
+                            if (isGuest) onRequestAuth() else shareSheetPost = post
+                        },
+                        onDelete = { onDeletePost?.invoke(it) },
+                        onEdit = { id, text -> onEditPost?.invoke(id, text) }
+                    )
+                } else if (isSponsoredPost) {
                     SponsoredPostCard(
                         post = post,
                         currentUser = currentUser,
@@ -401,6 +433,44 @@ fun FeedScreen(
                         .background(Color(0xFF050B18))
                 )
 
+                // Interleaved Widget 0: Sponsored Product Card after 2nd post (matching web ad integration)
+                if (index == 1) {
+                    val sponsoredProduct = products.find { it.isSponsored } ?: products.firstOrNull()
+                    val activeCampaign = adCampaigns.firstOrNull()
+                    val firstAd = ads.firstOrNull()
+
+                    SponsoredProductCard(
+                        product = sponsoredProduct,
+                        ad = activeCampaign ?: firstAd,
+                        currentUser = currentUser,
+                        users = allUsers,
+                        onProfileClick = { authorId ->
+                            allUsers.find { it.id == authorId }?.let { onUserClick(it) }
+                        },
+                        onViewProduct = { prodId ->
+                            val p = products.find { it.id == prodId } ?: sponsoredProduct
+                            if (p != null) onOpenProduct?.invoke(p) else onViewProduct?.invoke(prodId)
+                        },
+                        onReact = { p, reaction ->
+                            if (isGuest) onRequestAuth()
+                            else onReactPost?.invoke(p.id, reaction) ?: onLikePost(p.id)
+                        },
+                        onOpenComments = { p ->
+                            if (isGuest) onRequestAuth() else discussionsSheetPost = p
+                        },
+                        onShare = { p ->
+                            if (isGuest) onRequestAuth() else shareSheetPost = p
+                        }
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .background(Color(0xFF050B18))
+                    )
+                }
+
                 // Interleaved Widget 1: People You May Know
                 val effectivePymk = if (peopleYouMayKnow.isNotEmpty()) peopleYouMayKnow else allUsers.filter { it.id != currentUser.id }
                 val pymkInsertIndex1 = when {
@@ -448,6 +518,45 @@ fun FeedScreen(
                             onOpenGroup?.invoke(gid)
                         }
                     )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(8.dp)
+                            .background(Color(0xFF050B18))
+                    )
+                }
+
+                // Interleaved Widget 3: Sponsored Ad Campaign after 6th post (index == 5)
+                if (index == 5 && (adCampaigns.size > 1 || ads.size > 1)) {
+                    val secondCampaign = adCampaigns.getOrNull(1)
+                    val secondFeedAd = ads.getOrNull(1)
+
+                    if (secondCampaign != null) {
+                        SponsoredPostCard(
+                            ad = secondCampaign,
+                            currentUser = currentUser,
+                            onProfileClick = { uid -> allUsers.find { it.id == uid }?.let { onUserClick(it) } },
+                            onOpenComments = { discussionsSheetPost = Post(id = secondCampaign.id, author = User(secondCampaign.id, secondCampaign.name, "sponsor", secondCampaign.mediaUrl ?: ""), content = secondCampaign.description) },
+                            onReact = { _, _ -> /* react */ },
+                            onShare = { shareSheetPost = Post(id = secondCampaign.id, author = User(secondCampaign.id, secondCampaign.name, "sponsor", secondCampaign.mediaUrl ?: ""), content = secondCampaign.description) }
+                        )
+                    } else if (secondFeedAd != null) {
+                        val adFromFeed = AdCampaign(
+                            id = secondFeedAd.id,
+                            name = secondFeedAd.sponsorName.ifBlank { secondFeedAd.title },
+                            mediaUrl = secondFeedAd.imageUrl,
+                            description = secondFeedAd.description,
+                            cta = secondFeedAd.ctaText,
+                            link = secondFeedAd.ctaUrl,
+                            location = secondFeedAd.location
+                        )
+                        SponsoredPostCard(
+                            ad = adFromFeed,
+                            currentUser = currentUser,
+                            onProfileClick = { uid -> allUsers.find { it.id == uid }?.let { onUserClick(it) } }
+                        )
+                    }
+
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()

@@ -1567,7 +1567,8 @@ fun GroupMediaGrid(
 ) {
     MediaGrid(
         images = images,
-        onImageClick = onImageClick
+        onImageClick = onImageClick,
+        maxHeight = 560.dp
     )
 }
 

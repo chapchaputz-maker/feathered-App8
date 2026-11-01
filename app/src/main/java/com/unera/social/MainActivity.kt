@@ -276,6 +276,15 @@ fun FeatheredApp(
                         currentUser = uiState.currentUser,
                         stories = uiState.stories,
                         posts = uiState.posts,
+                        ads = uiState.sponsoredFeedAds,
+                        products = uiState.products,
+                        adCampaigns = uiState.adCampaigns,
+                        onViewProduct = { productId ->
+                            val prod = uiState.products.find { it.id == productId }
+                            if (prod != null) {
+                                viewModel.setSelectedProductForDetail(prod)
+                            }
+                        },
                         allUsers = uiState.users,
                         peopleYouMayKnow = uiState.peopleYouMayKnow,
                         onFollowFromPymk = { viewModel.toggleFollowUser(it) },

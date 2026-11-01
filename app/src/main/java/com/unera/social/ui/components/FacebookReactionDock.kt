@@ -55,6 +55,7 @@ data class FacebookReaction(
 val FACEBOOK_REACTIONS = listOf(
     FacebookReaction("like", "Like", R.drawable.reaction_like, "👍", Color(0xFF1877F2)),
     FacebookReaction("love", "Love", R.drawable.reaction_love, "❤️", Color(0xFFF43F5E)),
+    FacebookReaction("care", "Care", R.drawable.reaction_care, "🥰", Color(0xFFF59E0B)),
     FacebookReaction("haha", "Haha", R.drawable.reaction_haha, "😆", Color(0xFFFBBF24)),
     FacebookReaction("wow", "Wow", R.drawable.reaction_wow, "😮", Color(0xFFFBBF24)),
     FacebookReaction("sad", "Sad", R.drawable.reaction_sad, "😢", Color(0xFFFBBF24)),

@@ -91,11 +91,11 @@ fun FeatheredTopBar(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // 1. MarketPoint Button: no shade border, shade color reduced to layout color, icon +1.5px (21.5.dp) with bold borders
+                    // 1. MarketPoint Button: restored previous Storefront design, no shade border, layout shade color, sized to feathered text (24.dp)
                     Box {
                         Box(
                             modifier = Modifier
-                                .size(42.dp)
+                                .size(44.dp)
                                 .clip(CircleShape)
                                 .background(
                                     if (isMarketplaceActive) Color(0xFF1E2D4A)
@@ -106,10 +106,10 @@ fun FeatheredTopBar(
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                painter = painterResource(id = R.drawable.ic_marketplace_bold),
+                                imageVector = Icons.Default.Storefront,
                                 contentDescription = "MarketPoint",
-                                tint = Color.Unspecified,
-                                modifier = Modifier.size(21.5.dp)
+                                tint = Color.White,
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
@@ -135,10 +135,10 @@ fun FeatheredTopBar(
                         }
                     }
 
-                    // 2. Search Button: no shade border, shade color reduced to layout color, icon +1.5px (21.5.dp) with bold borders
+                    // 2. Search Button: no shade border, layout shade color, bold borders, sized to feathered text (24.dp)
                     Box(
                         modifier = Modifier
-                            .size(42.dp)
+                            .size(44.dp)
                             .clip(CircleShape)
                             .background(Color(0xFF131D33))
                             .clickable { onSearchClick() }
@@ -149,15 +149,15 @@ fun FeatheredTopBar(
                             painter = painterResource(id = R.drawable.ic_search_bold),
                             contentDescription = "Search",
                             tint = Color.Unspecified,
-                            modifier = Modifier.size(21.5.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
 
-                    // 3. Notification Button: no shade border, shade color reduced to layout color, icon +1.5px (21.5.dp), dark in middle and bold white borders
+                    // 3. Notification Button: no shade border, layout shade color, dark in middle + bold white borders, sized to feathered text (24.dp)
                     Box {
                         Box(
                             modifier = Modifier
-                                .size(42.dp)
+                                .size(44.dp)
                                 .clip(CircleShape)
                                 .background(Color(0xFF131D33))
                                 .clickable { onNotificationsClick() }
@@ -168,7 +168,7 @@ fun FeatheredTopBar(
                                 painter = painterResource(id = R.drawable.ic_bell),
                                 contentDescription = "Notifications",
                                 tint = Color.Unspecified,
-                                modifier = Modifier.size(21.5.dp)
+                                modifier = Modifier.size(24.dp)
                             )
                         }
 
@@ -183,8 +183,9 @@ fun FeatheredTopBar(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
                                     .offset(x = 2.dp, y = (-2).dp)
+                                    .sizeIn(minWidth = 18.dp, minHeight = 18.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFFF97316))
+                                    .background(Color(0xFFE41E3F))
                                     .border(1.5.dp, Color(0xFF0F172A), CircleShape)
                                     .padding(horizontal = 4.dp, vertical = 1.dp),
                                 contentAlignment = Alignment.Center

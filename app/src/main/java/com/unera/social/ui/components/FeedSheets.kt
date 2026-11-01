@@ -47,6 +47,9 @@ import com.unera.social.model.Event
 import com.unera.social.model.Song
 import com.unera.social.ui.screens.WebPostCard
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 
 private fun formatCount(count: Int): String {
     return when {
@@ -60,6 +63,7 @@ private fun formatCount(count: Int): String {
 val REACTION_EMOJIS = listOf(
     "like" to "👍",
     "love" to "❤️",
+    "care" to "🥰",
     "haha" to "😂",
     "wow" to "😮",
     "sad" to "😢",
@@ -897,7 +901,17 @@ fun DiscussionsSheetDialog(
                                             if (c.id == comment.id) {
                                                 val newLiked = !c.isLiked
                                                 val newCount = if (newLiked) c.likesCount + 1 else (c.likesCount - 1).coerceAtLeast(0)
-                                                c.copy(isLiked = newLiked, likesCount = newCount)
+                                                c.copy(isLiked = newLiked, myReaction = if (newLiked) "like" else null, likesCount = newCount)
+                                            } else c
+                                        }
+                                        onLikeComment(comment.id)
+                                    },
+                                    onReact = { reactionType ->
+                                        liveComments = liveComments.map { c ->
+                                            if (c.id == comment.id) {
+                                                val wasLiked = c.isLiked
+                                                val newCount = if (!wasLiked) c.likesCount + 1 else c.likesCount
+                                                c.copy(isLiked = true, myReaction = reactionType, likesCount = newCount)
                                             } else c
                                         }
                                         onLikeComment(comment.id)
@@ -1116,10 +1130,14 @@ fun DiscussionsSheetDialog(
 private fun CommentItemRow(
     comment: Comment,
     onLike: () -> Unit,
+    onReact: (String) -> Unit = {},
     onReply: () -> Unit,
     onMoreOptions: (() -> Unit)? = null,
     onUserClick: (() -> Unit)? = null
 ) {
+    var showReactionDock by remember { mutableStateOf(false) }
+    val currentReaction = getFacebookReaction(comment.myReaction)
+
     Row(modifier = Modifier.fillMaxWidth()) {
         FeatheredAvatar(
             name = comment.author.name,
@@ -1187,7 +1205,7 @@ private fun CommentItemRow(
                 }
             }
 
-            // Sub-bar: Time, Like, Reply, Options
+            // Sub-bar: Time, Like (Tap / Hold for 7 3D Reactions Dock), Reply, Options, Count
             Row(
                 modifier = Modifier
                     .padding(start = 8.dp, top = 4.dp),
@@ -1200,13 +1218,66 @@ private fun CommentItemRow(
                     color = Color(0xFF94A3B8)
                 )
 
-                Text(
-                    text = if (comment.isLiked) "❤️ Liked" else "🤍 Like",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (comment.isLiked) Color(0xFFF43F5E) else Color(0xFF94A3B8),
-                    modifier = Modifier.clickable(onClick = onLike)
-                )
+                // 7 3D Facebook Reaction dock & button on comment
+                Box {
+                    if (showReactionDock) {
+                        Box(
+                            modifier = Modifier
+                                .offset(y = (-58).dp)
+                                .zIndex(30f)
+                        ) {
+                            FacebookReactionDock(
+                                onSelectReaction = { type ->
+                                    onReact(type)
+                                    showReactionDock = false
+                                },
+                                onDismiss = { showReactionDock = false }
+                            )
+                        }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .pointerInput(comment.id, showReactionDock) {
+                                detectTapGestures(
+                                    onLongPress = { showReactionDock = true },
+                                    onTap = {
+                                        if (showReactionDock) showReactionDock = false
+                                        else onLike()
+                                    }
+                                )
+                            }
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (currentReaction != null) {
+                                Box(
+                                    modifier = Modifier.size(16.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    AsyncImage(
+                                        model = currentReaction.gifRes,
+                                        contentDescription = currentReaction.label,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = currentReaction.label,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = currentReaction.color
+                                )
+                            } else {
+                                Text(
+                                    text = if (comment.isLiked) "❤️ Liked" else "🤍 Like",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (comment.isLiked) Color(0xFFF43F5E) else Color(0xFF94A3B8)
+                                )
+                            }
+                        }
+                    }
+                }
 
                 Text(
                     text = "Reply",
@@ -1226,12 +1297,28 @@ private fun CommentItemRow(
                 }
 
                 if (comment.likesCount > 0) {
-                    Text(
-                        text = "❤️ ${comment.likesCount}",
-                        fontSize = 11.sp,
-                        color = Color(0xFFF43F5E),
-                        fontWeight = FontWeight.Bold
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        if (currentReaction != null) {
+                            Box(modifier = Modifier.size(14.dp), contentAlignment = Alignment.Center) {
+                                AsyncImage(
+                                    model = currentReaction.gifRes,
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        } else {
+                            Text("❤️", fontSize = 11.sp)
+                        }
+                        Text(
+                            text = "${comment.likesCount}",
+                            fontSize = 11.sp,
+                            color = currentReaction?.color ?: Color(0xFFF43F5E),
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             }
         }

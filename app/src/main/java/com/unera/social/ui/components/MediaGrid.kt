@@ -119,7 +119,7 @@ fun MediaGrid(
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .aspectRatio(1f)
+                                .aspectRatio(0.85f)
                                 .background(Color(0xFF0F172A))
                                 .clickable { handleClick(item.url, index) }
                                 .testTag("media_grid_item_$index")
