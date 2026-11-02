@@ -318,6 +318,7 @@ fun FeatheredApp(
                         onDeletePost = { viewModel.deletePost(it) },
                         onEditPost = { id, text -> viewModel.editPost(id, text) },
                         onHidePost = { viewModel.hidePost(it) },
+                        onPushMore = { viewModel.pushMore(it) },
                         onPlayMusic = { song ->
                             val track = com.unera.social.model.AudioTrack(
                                 id = song.id,

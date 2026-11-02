@@ -63,26 +63,26 @@ fun AdsManagerScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var showCreator by remember { mutableStateOf(initialPost != null) }
-    var selectedTab by remember { mutableStateOf("dashboard") } // "dashboard", "campaigns"
+    var selectedTab by remember { mutableStateOf(if (initialPost != null) "create" else "dashboard") } // "dashboard", "create", "campaigns"
     var filter by remember { mutableStateOf("all") } // "all", "active", "paused", "completed"
     var campaignToDelete by remember { mutableStateOf<AdCampaign?>(null) }
+    var selectedAnalyticsCampaign by remember { mutableStateOf<AdCampaign?>(null) }
 
     val filteredCampaigns = remember(campaigns, filter) {
         if (filter == "all") campaigns
         else campaigns.filter { it.status.equals(filter, ignoreCase = true) }
     }
 
-    if (showCreator) {
+    if (selectedTab == "create") {
         AdCreator(
             currentUser = currentUser,
             userPosts = userPosts,
             initialPost = initialPost,
-            onBack = { showCreator = false },
-            onSuccess = { showCreator = false },
+            onBack = { selectedTab = "campaigns" },
+            onSuccess = { selectedTab = "campaigns" },
             onCreateCampaign = { postId, name, type, mediaUrl, mediaUrls, desc, link, phone, email, cta, loc, budget, days ->
                 onCreateCampaign(postId, name, type, mediaUrl, mediaUrls, desc, link, phone, email, cta, loc, budget, days)
-                showCreator = false
+                selectedTab = "campaigns"
             }
         )
         return
@@ -137,7 +137,7 @@ fun AdsManagerScreen(
                         }
 
                         Button(
-                            onClick = { showCreator = true },
+                            onClick = { selectedTab = "create" },
                             shape = RoundedCornerShape(10.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
                             modifier = Modifier.height(40.dp)
@@ -150,7 +150,7 @@ fun AdsManagerScreen(
 
                     Spacer(modifier = Modifier.height(16.dp))
 
-                    // Tab selector between Ad Analytics (Dashboard) and Campaigns
+                    // 3-Tab selector matching web: Analytics, Create Ad, My Campaigns
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -176,12 +176,39 @@ fun AdsManagerScreen(
                                     tint = if (selectedTab == "dashboard") Color.White else Color(0xFFA1A1AA),
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Analytics",
-                                    fontSize = 13.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = if (selectedTab == "dashboard") FontWeight.Bold else FontWeight.Medium,
                                     color = if (selectedTab == "dashboard") Color.White else Color(0xFFA1A1AA)
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = { selectedTab = "create" },
+                            shape = RoundedCornerShape(9.dp),
+                            color = if (selectedTab == "create") Color(0xFF2563EB) else Color.Transparent,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(vertical = 8.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AddCircleOutline,
+                                    contentDescription = null,
+                                    tint = if (selectedTab == "create") Color.White else Color(0xFFA1A1AA),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text(
+                                    text = "Create Ad",
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selectedTab == "create") FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selectedTab == "create") Color.White else Color(0xFFA1A1AA)
                                 )
                             }
                         }
@@ -203,10 +230,10 @@ fun AdsManagerScreen(
                                     tint = if (selectedTab == "campaigns") Color.White else Color(0xFFA1A1AA),
                                     modifier = Modifier.size(16.dp)
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
                                 Text(
                                     text = "Campaigns",
-                                    fontSize = 13.sp,
+                                    fontSize = 12.sp,
                                     fontWeight = if (selectedTab == "campaigns") FontWeight.Bold else FontWeight.Medium,
                                     color = if (selectedTab == "campaigns") Color.White else Color(0xFFA1A1AA)
                                 )
@@ -335,7 +362,7 @@ fun AdsManagerScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Button(
-                                onClick = { showCreator = true },
+                                onClick = { selectedTab = "create" },
                                 shape = RoundedCornerShape(10.dp),
                                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB))
                             ) {
@@ -352,7 +379,8 @@ fun AdsManagerScreen(
                             if (ad.status == "active") onPauseCampaign(ad.id)
                             else onResumeCampaign(ad.id)
                         },
-                        onDelete = { campaignToDelete = ad }
+                        onDelete = { campaignToDelete = ad },
+                        onViewAnalytics = { selectedAnalyticsCampaign = ad }
                     )
                     Spacer(modifier = Modifier.height(14.dp))
                 }
@@ -389,6 +417,14 @@ fun AdsManagerScreen(
                 }
             )
         }
+
+        // Campaign Analytics Modal Dialog (matching web showAdAnalytics)
+        selectedAnalyticsCampaign?.let { ad ->
+            CampaignAnalyticsModal(
+                campaign = ad,
+                onClose = { selectedAnalyticsCampaign = null }
+            )
+        }
     }
 }
 
@@ -399,7 +435,8 @@ fun AdsManagerScreen(
 private fun AdCampaignCard(
     ad: AdCampaign,
     onTogglePause: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onViewAnalytics: () -> Unit
 ) {
     val mediaUrl = ad.mediaUrls.firstOrNull() ?: ad.mediaUrl
     val isVideo = ad.type == "video"
@@ -507,8 +544,23 @@ private fun AdCampaignCard(
                     }
                 }
 
-                // Pause/Resume & Delete Buttons
+                // Actions: Analytics, Pause/Resume & Delete
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    IconButton(
+                        onClick = onViewAnalytics,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color(0xFF1E293B))
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.TrendingUp,
+                            contentDescription = "Analytics",
+                            tint = Color(0xFF38BDF8),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+
                     IconButton(
                         onClick = onTogglePause,
                         enabled = ad.status != "completed",
@@ -597,5 +649,202 @@ private fun StatColumn(
         Spacer(modifier = Modifier.height(2.dp))
         Text(text = value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = valueColor)
         Text(text = label, fontSize = 10.sp, color = Color(0xFF71717A))
+    }
+}
+
+/**
+ * CampaignAnalyticsModal - Matches web showAdAnalytics modal dialog exactly.
+ * Displays impressions, views, clicks, CTR%, cost ($0 FREE), location, and dates.
+ */
+@Composable
+fun CampaignAnalyticsModal(
+    campaign: AdCampaign,
+    onClose: () -> Unit
+) {
+    val ctr = if (campaign.impressions > 0) {
+        String.format(java.util.Locale.US, "%.2f", (campaign.clicks.toDouble() / campaign.impressions.toDouble()) * 100.0)
+    } else "0.00"
+
+    AlertDialog(
+        onDismissRequest = onClose,
+        containerColor = Color(0xFF0F172A),
+        shape = RoundedCornerShape(20.dp),
+        title = null,
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                // Header with status
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = campaign.name.ifBlank { "Campaign #${campaign.id}" },
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Campaign Performance Analytics",
+                            fontSize = 12.sp,
+                            color = Color(0xFFA1A1AA)
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(
+                                if (campaign.status == "active") Color(0xFF10B981).copy(alpha = 0.2f)
+                                else Color(0xFFF59E0B).copy(alpha = 0.2f)
+                            )
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = campaign.status.uppercase(),
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (campaign.status == "active") Color(0xFF34D399) else Color(0xFFFBBF24)
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = Color(0xFF1E293B), thickness = 1.dp)
+
+                // 2x2 Metrics Grid
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AnalyticsMetricTile(
+                        title = "Impressions",
+                        value = java.text.NumberFormat.getIntegerInstance().format(campaign.impressions),
+                        icon = Icons.Default.Visibility,
+                        color = Color(0xFF38BDF8),
+                        modifier = Modifier.weight(1f)
+                    )
+                    AnalyticsMetricTile(
+                        title = "Views",
+                        value = java.text.NumberFormat.getIntegerInstance().format(campaign.views),
+                        icon = Icons.Default.PlayArrow,
+                        color = Color(0xFFA855F7),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AnalyticsMetricTile(
+                        title = "Clicks",
+                        value = java.text.NumberFormat.getIntegerInstance().format(campaign.clicks),
+                        icon = Icons.Default.TouchApp,
+                        color = Color(0xFF10B981),
+                        modifier = Modifier.weight(1f)
+                    )
+                    AnalyticsMetricTile(
+                        title = "Click-Through",
+                        value = "$ctr%",
+                        icon = Icons.Default.TrendingUp,
+                        color = Color(0xFFF59E0B),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                // Additional Campaign Info
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B).copy(alpha = 0.6f))
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Spend / Cost:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+                            Text("FREE ($0)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFF34D399))
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Target Location:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+                            Text(campaign.location.ifBlank { "Global" }, fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color.White)
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text("Campaign Dates:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+                            Text("${campaign.startDate} - ${campaign.endDate}", fontSize = 12.sp, color = Color(0xFFCBD5E1))
+                        }
+                        if (campaign.cta.isNotBlank()) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Call-To-Action:", fontSize = 12.sp, color = Color(0xFF94A3B8))
+                                Text(campaign.cta, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF38BDF8))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = onClose,
+                shape = RoundedCornerShape(8.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2563EB)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Close", fontWeight = FontWeight.Bold, color = Color.White)
+            }
+        }
+    )
+}
+
+@Composable
+private fun AnalyticsMetricTile(
+    title: String,
+    value: String,
+    icon: ImageVector,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.25f))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(imageVector = icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
+                Text(text = title, fontSize = 11.sp, color = Color(0xFF94A3B8))
+            }
+            Text(
+                text = value,
+                fontSize = 18.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
     }
 }

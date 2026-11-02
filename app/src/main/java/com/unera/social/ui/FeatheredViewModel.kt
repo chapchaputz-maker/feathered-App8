@@ -3,6 +3,7 @@ package com.unera.social.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.unera.social.data.AdsApiService
 import com.unera.social.data.EventsApiService
 import com.unera.social.data.GroupsApiService
 import com.unera.social.data.GroupMemberInfo
@@ -308,12 +309,24 @@ class FeatheredViewModel(application: Application) : AndroidViewModel(applicatio
     fun refreshFeedAds() {
         viewModelScope.launch {
             _uiState.update { it.copy(isFeedAdsLoading = true) }
-            val liveAds = VideosApiService.fetchFeedAds()
+            val liveAds = AdsApiService.fetchFeedAds()
             _uiState.update { state ->
                 state.copy(
                     sponsoredFeedAds = liveAds,
                     isFeedAdsLoading = false
                 )
+            }
+        }
+        fetchMyAds()
+    }
+
+    fun fetchMyAds() {
+        val currentUserId = _uiState.value.currentUser.id
+        if (currentUserId <= 0L || _uiState.value.isGuest) return
+        viewModelScope.launch {
+            val liveCampaigns = AdsApiService.fetchMyAds(currentUserId)
+            if (liveCampaigns.isNotEmpty()) {
+                _uiState.update { it.copy(adCampaigns = liveCampaigns) }
             }
         }
     }
@@ -3718,27 +3731,39 @@ class FeatheredViewModel(application: Application) : AndroidViewModel(applicatio
     // ==========================================
 
     fun pauseAdCampaign(id: Long) {
+        val currentUserId = _uiState.value.currentUser.id
         _uiState.update { state ->
             val updated = state.adCampaigns.map {
                 if (it.id == id) it.copy(status = "paused") else it
             }
             state.copy(adCampaigns = updated)
         }
+        viewModelScope.launch {
+            AdsApiService.pauseOrResumeCampaign(id, "pause", currentUserId)
+        }
     }
 
     fun resumeAdCampaign(id: Long) {
+        val currentUserId = _uiState.value.currentUser.id
         _uiState.update { state ->
             val updated = state.adCampaigns.map {
                 if (it.id == id) it.copy(status = "active") else it
             }
             state.copy(adCampaigns = updated)
         }
+        viewModelScope.launch {
+            AdsApiService.pauseOrResumeCampaign(id, "resume", currentUserId)
+        }
     }
 
     fun deleteAdCampaign(id: Long) {
+        val currentUserId = _uiState.value.currentUser.id
         _uiState.update { state ->
             val updated = state.adCampaigns.filter { it.id != id }
             state.copy(adCampaigns = updated)
+        }
+        viewModelScope.launch {
+            AdsApiService.deleteCampaign(id, currentUserId)
         }
     }
 
@@ -3757,9 +3782,11 @@ class FeatheredViewModel(application: Application) : AndroidViewModel(applicatio
         budget: Int,
         days: Int
     ) {
+        val currentUserId = _uiState.value.currentUser.id
+        val tempId = System.currentTimeMillis()
         val newCampaign = AdCampaign(
-            id = System.currentTimeMillis(),
-            name = name.ifBlank { "Campaign #${System.currentTimeMillis() % 1000}" },
+            id = tempId,
+            name = name.ifBlank { "Campaign #${tempId % 1000}" },
             type = type,
             status = "active",
             mediaUrl = mediaUrl,
@@ -3785,10 +3812,43 @@ class FeatheredViewModel(application: Application) : AndroidViewModel(applicatio
                 activeAdCampaignToBoostPost = null
             )
         }
+        viewModelScope.launch {
+            val (success, created) = AdsApiService.createCampaign(
+                userId = currentUserId,
+                postId = postId,
+                name = name,
+                type = type,
+                mediaUrl = mediaUrl,
+                mediaUrls = mediaUrls,
+                description = description,
+                link = link,
+                phone = phone,
+                email = email,
+                cta = cta,
+                location = location,
+                budget = budget,
+                days = days
+            )
+            if (success && created != null) {
+                _uiState.update { state ->
+                    val updated = state.adCampaigns.map { if (it.id == tempId) created else it }
+                    state.copy(adCampaigns = updated)
+                }
+            }
+        }
     }
 
     fun setAdCampaignToBoostPost(post: Post?) {
         _uiState.update { it.copy(activeAdCampaignToBoostPost = post) }
+    }
+
+    fun pushMore(post: Post) {
+        _uiState.update {
+            it.copy(
+                activeAdCampaignToBoostPost = post,
+                currentScreen = Screen.ADS_MANAGER
+            )
+        }
     }
 
     // ==========================================

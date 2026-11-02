@@ -61,6 +61,7 @@ fun PostMenu(
     onEditSuccess: ((Post) -> Unit)? = null,
     onHidePost: ((Long) -> Unit)? = null,
     onReportPost: ((Long, String) -> Unit)? = null,
+    onPushMore: ((Post) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -155,6 +156,36 @@ fun PostMenu(
                         isEditModalOpen = true
                     },
                     modifier = Modifier.testTag("menu_edit_post_$itemId")
+                )
+            }
+
+            // Boost Post / Create Ad (Push More)
+            if (isOwner && !isStory && !isSong && onPushMore != null) {
+                DropdownMenuItem(
+                    text = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Campaign,
+                                contentDescription = null,
+                                tint = Color(0xFF38BDF8),
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Boost Post (Ad)",
+                                color = Color(0xFF38BDF8),
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                        }
+                    },
+                    onClick = {
+                        open = false
+                        onPushMore(item)
+                    },
+                    modifier = Modifier.testTag("menu_boost_post_$itemId")
                 )
             }
 

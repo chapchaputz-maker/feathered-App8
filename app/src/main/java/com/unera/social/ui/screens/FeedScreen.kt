@@ -182,6 +182,7 @@ fun FeedScreen(
     onEditPost: ((Long, String) -> Unit)? = null,
     onHidePost: ((Long) -> Unit)? = null,
     onReportPost: ((Long, String) -> Unit)? = null,
+    onPushMore: ((Post) -> Unit)? = null,
     uploadState: PostUploadState? = null,
     onDismissUpload: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -195,6 +196,49 @@ fun FeedScreen(
     var groupJoinedStates by remember { mutableStateOf(mapOf<Long, Boolean>()) }
 
     val listState = rememberRestoredLazyListState(key = "FEED")
+
+    // Merge real live ads from /api/ads/feeds every 5 posts only when real ads exist. Never fake ads.
+    val feedPosts = remember(posts, ads) {
+        if (ads.isEmpty()) {
+            posts
+        } else {
+            val result = mutableListOf<Post>()
+            var adIndex = 0
+            posts.forEachIndexed { i, p ->
+                result.add(p)
+                if ((i + 1) % 5 == 0 && adIndex < ads.size) {
+                    val ad = ads[adIndex]
+                    val adPost = Post(
+                        id = -100000L - ad.id,
+                        userId = ad.brandId ?: 0L,
+                        author = User(
+                            id = ad.brandId ?: 0L,
+                            name = ad.sponsorName.ifBlank { "Sponsored Partner" },
+                            username = ad.sponsorName.lowercase().replace(" ", ""),
+                            profileImageUrl = ad.sponsorAvatar.ifBlank { "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400" },
+                            isVerified = true
+                        ),
+                        content = ad.description,
+                        timestamp = "Ad",
+                        mediaUrl = ad.imageUrl ?: ad.videoUrl,
+                        mediaUrls = if (!ad.imageUrl.isNullOrBlank()) listOf(ad.imageUrl) else emptyList(),
+                        videoUrl = ad.videoUrl,
+                        isSponsored = true,
+                        postType = "ad",
+                        sponsoredHeadline = ad.headline.ifBlank { ad.title },
+                        sponsoredCtaText = ad.ctaText.ifBlank { "Learn More" },
+                        sponsoredCtaUrl = ad.ctaUrl,
+                        likesCount = 0,
+                        commentsCount = 0,
+                        sharesCount = 0
+                    )
+                    result.add(adPost)
+                    adIndex++
+                }
+            }
+            result
+        }
+    }
 
     Box(
         modifier = modifier
@@ -256,7 +300,7 @@ fun FeedScreen(
             }
 
             // 3. Posts with Interleaved Widgets
-            itemsIndexed(posts, key = { _, post -> "post_${post.id}" }) { index, rawPost ->
+            itemsIndexed(feedPosts, key = { _, post -> "post_${post.id}" }) { index, rawPost ->
                 val post = remember(rawPost, allUsers) {
                     val uId = if (rawPost.userId > 0L) rawPost.userId else rawPost.author.id
                     val matchedUser = allUsers.find { it.id == uId }
@@ -291,51 +335,8 @@ fun FeedScreen(
                 )
 
                 val isSponsoredPost = post.isSponsored || post.postType == "sponsored" || post.postType == "ad"
-                val isSponsoredProduct = (isSponsoredPost && (post.product != null || post.postType == "product")) || (post.product != null && post.product.isSponsored)
 
-                if (isSponsoredProduct) {
-                    SponsoredProductCard(
-                        product = post.product,
-                        ad = post,
-                        currentUser = currentUser,
-                        users = allUsers,
-                        onProfileClick = { onUserClick(post.author) },
-                        onViewProduct = { prodId ->
-                            val targetProd = post.product ?: products.find { it.id == prodId }
-                            if (targetProd != null) onOpenProduct?.invoke(targetProd)
-                            else onViewProduct?.invoke(prodId)
-                        },
-                        onReact = { _, reaction ->
-                            if (isGuest) onRequestAuth()
-                            else onReactPost?.invoke(post.id, reaction) ?: onLikePost(post.id)
-                        },
-                        onOpenComments = {
-                            if (isGuest) onRequestAuth() else discussionsSheetPost = post
-                        },
-                        onShare = {
-                            if (isGuest) onRequestAuth() else shareSheetPost = post
-                        },
-                        onDelete = { onDeletePost?.invoke(it) },
-                        onEdit = { id, text -> onEditPost?.invoke(id, text) }
-                    )
-                } else if (isSponsoredPost) {
-                    SponsoredPostCard(
-                        post = post,
-                        currentUser = currentUser,
-                        onProfileClick = { onUserClick(post.author) },
-                        onAnalyticsClick = { /* Handled in Ads Manager */ },
-                        onOpenComments = {
-                            if (isGuest) onRequestAuth() else discussionsSheetPost = post
-                        },
-                        onReact = { _, reaction ->
-                            if (isGuest) onRequestAuth()
-                            else onReactPost?.invoke(post.id, reaction) ?: onLikePost(post.id)
-                        },
-                        onShare = {
-                            if (isGuest) onRequestAuth() else shareSheetPost = post
-                        }
-                    )
-                } else if (isStandaloneVideo) {
+                if (isStandaloneVideo && !isSponsoredPost) {
                     InstagramVideoCard(
                         post = post,
                         currentUser = currentUser,
@@ -421,7 +422,8 @@ fun FeedScreen(
                         onDeletePost = { onDeletePost?.invoke(it) },
                         onEditPost = { id, text -> onEditPost?.invoke(id, text) },
                         onHidePost = { onHidePost?.invoke(it) },
-                        onReportPost = { id, reason -> onReportPost?.invoke(id, reason) }
+                        onReportPost = { id, reason -> onReportPost?.invoke(id, reason) },
+                        onPushMore = onPushMore
                     )
                 }
 
@@ -432,44 +434,6 @@ fun FeedScreen(
                         .height(8.dp)
                         .background(Color(0xFF050B18))
                 )
-
-                // Interleaved Widget 0: Sponsored Product Card after 2nd post (matching web ad integration)
-                if (index == 1) {
-                    val sponsoredProduct = products.find { it.isSponsored } ?: products.firstOrNull()
-                    val activeCampaign = adCampaigns.firstOrNull()
-                    val firstAd = ads.firstOrNull()
-
-                    SponsoredProductCard(
-                        product = sponsoredProduct,
-                        ad = activeCampaign ?: firstAd,
-                        currentUser = currentUser,
-                        users = allUsers,
-                        onProfileClick = { authorId ->
-                            allUsers.find { it.id == authorId }?.let { onUserClick(it) }
-                        },
-                        onViewProduct = { prodId ->
-                            val p = products.find { it.id == prodId } ?: sponsoredProduct
-                            if (p != null) onOpenProduct?.invoke(p) else onViewProduct?.invoke(prodId)
-                        },
-                        onReact = { p, reaction ->
-                            if (isGuest) onRequestAuth()
-                            else onReactPost?.invoke(p.id, reaction) ?: onLikePost(p.id)
-                        },
-                        onOpenComments = { p ->
-                            if (isGuest) onRequestAuth() else discussionsSheetPost = p
-                        },
-                        onShare = { p ->
-                            if (isGuest) onRequestAuth() else shareSheetPost = p
-                        }
-                    )
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(8.dp)
-                            .background(Color(0xFF050B18))
-                    )
-                }
 
                 // Interleaved Widget 1: People You May Know
                 val effectivePymk = if (peopleYouMayKnow.isNotEmpty()) peopleYouMayKnow else allUsers.filter { it.id != currentUser.id }
@@ -518,45 +482,6 @@ fun FeedScreen(
                             onOpenGroup?.invoke(gid)
                         }
                     )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(8.dp)
-                            .background(Color(0xFF050B18))
-                    )
-                }
-
-                // Interleaved Widget 3: Sponsored Ad Campaign after 6th post (index == 5)
-                if (index == 5 && (adCampaigns.size > 1 || ads.size > 1)) {
-                    val secondCampaign = adCampaigns.getOrNull(1)
-                    val secondFeedAd = ads.getOrNull(1)
-
-                    if (secondCampaign != null) {
-                        SponsoredPostCard(
-                            ad = secondCampaign,
-                            currentUser = currentUser,
-                            onProfileClick = { uid -> allUsers.find { it.id == uid }?.let { onUserClick(it) } },
-                            onOpenComments = { discussionsSheetPost = Post(id = secondCampaign.id, author = User(secondCampaign.id, secondCampaign.name, "sponsor", secondCampaign.mediaUrl ?: ""), content = secondCampaign.description) },
-                            onReact = { _, _ -> /* react */ },
-                            onShare = { shareSheetPost = Post(id = secondCampaign.id, author = User(secondCampaign.id, secondCampaign.name, "sponsor", secondCampaign.mediaUrl ?: ""), content = secondCampaign.description) }
-                        )
-                    } else if (secondFeedAd != null) {
-                        val adFromFeed = AdCampaign(
-                            id = secondFeedAd.id,
-                            name = secondFeedAd.sponsorName.ifBlank { secondFeedAd.title },
-                            mediaUrl = secondFeedAd.imageUrl,
-                            description = secondFeedAd.description,
-                            cta = secondFeedAd.ctaText,
-                            link = secondFeedAd.ctaUrl,
-                            location = secondFeedAd.location
-                        )
-                        SponsoredPostCard(
-                            ad = adFromFeed,
-                            currentUser = currentUser,
-                            onProfileClick = { uid -> allUsers.find { it.id == uid }?.let { onUserClick(it) } }
-                        )
-                    }
-
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1092,6 +1017,7 @@ fun WebPostCard(
     onEditPost: (Long, String) -> Unit = { _, _ -> },
     onHidePost: (Long) -> Unit = {},
     onReportPost: ((Long, String) -> Unit)? = null,
+    onPushMore: ((Post) -> Unit)? = null,
     hideCommentPreview: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -1214,7 +1140,8 @@ fun WebPostCard(
                             VerifiedBadge(size = 21.dp)
                         }
 
-                        if (post.isSponsored) {
+                        val isAdPost = post.isSponsored || post.postType == "ad" || post.postType == "sponsored"
+                        if (isAdPost) {
                             Spacer(modifier = Modifier.width(6.dp))
                             Box(
                                 modifier = Modifier
@@ -1222,7 +1149,7 @@ fun WebPostCard(
                                     .background(Color(0xFF1E293B))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
-                                Text("Sponsored", fontSize = 10.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
+                                Text("Ad", fontSize = 10.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -1232,7 +1159,8 @@ fun WebPostCard(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        val displayTime = PostsApiService.formatRelativeTime(post.timestamp)
+                        val isAdPost = post.isSponsored || post.postType == "ad" || post.postType == "sponsored"
+                        val displayTime = if (isAdPost) "Ad" else PostsApiService.formatRelativeTime(post.timestamp).let { if (it.isBlank() || it.equals("Sponsored", ignoreCase = true)) "Ad" else it }
                         if (post.groupId != null) {
                             Text(
                                 text = post.author.name,
@@ -1291,8 +1219,9 @@ fun WebPostCard(
                     }
                 }
 
-                // Follow button if not current user
-                if (post.author.id != currentUser.id && !post.isSponsored) {
+                // Follow button if not current user and not ad
+                val isAdPost = post.isSponsored || post.postType == "ad" || post.postType == "sponsored"
+                if (post.author.id != currentUser.id && !isAdPost) {
                     Button(
                         onClick = onFollowToggle,
                         colors = ButtonDefaults.buttonColors(
@@ -1324,6 +1253,7 @@ fun WebPostCard(
                     item = post,
                     currentUser = currentUser,
                     onShare = { onShare() },
+                    onPushMore = onPushMore,
                     onDeleteSuccess = { onDeletePost(post.id) },
                     onEditSuccess = { onEditPost(post.id, it.content) },
                     onHidePost = { onHidePost(post.id) },
@@ -1528,26 +1458,35 @@ fun WebPostCard(
                 }
             }
 
-            // Sponsored CTA Button
-            if (post.isSponsored && post.sponsoredCtaText.isNotBlank()) {
+            // Sponsored CTA Button (labeled Ad)
+            val isAd = post.isSponsored || post.postType == "ad" || post.postType == "sponsored"
+            if (isAd) {
+                val cta = post.sponsoredCtaText.ifBlank { if (post.product != null) "Shop Now" else "Learn More" }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
                 ) {
                     Button(
-                        onClick = { /* Open Ad URL */ },
-                        modifier = Modifier.fillMaxWidth(),
+                        onClick = {
+                            if (post.product != null) {
+                                onOpenProduct(post.product)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(42.dp),
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1877F2))
                     ) {
                         Text(
-                            text = post.sponsoredCtaText,
+                            text = cta,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
+                            fontSize = 15.sp,
+                            color = Color.White
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.ChevronRight, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color.White)
                     }
                 }
             }
